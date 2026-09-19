@@ -1,0 +1,66 @@
+# Render Blueprint — backend API
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: youtube-analytics-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: youtube_analytics
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_EXTRACTION_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_MAPPING_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_GENERATION_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_CONTENT_PLAN_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_CONTENT_PLAN_MAP_EFFORT
+        value: low
+      - key: OPENAI_TTS_MODEL
+        value: gpt-4o-mini-tts
+      - key: OPENAI_TTS_VOICE
+        value: onyx
+      - key: YT_METADATA_MODEL
+        value: gpt-5.6-luna
+      - key: YT_METADATA_EFFORT
+        value: low
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: TRENDS_GEO
+        value: IN
+      - key: TRENDS_LOCATION_NAME
+        value: India
+      - key: TRENDS_TTL_DAYS
+        value: "7"

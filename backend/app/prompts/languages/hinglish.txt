@@ -1,0 +1,6 @@
+Write the title and description in Hinglish — a natural, conversational mix of Hindi (Devanagari) and English that Indian audiences love. Use Hindi for conversational tone and English for niche jargon / technical terms.
+
+Example title: "Hook weak है या Thumbnail मार रहा है?" — NOT pure English or pure Hindi.
+
+Tags should mix Hindi and English keyword phrases for maximum SEO reach.
+Language label for this output: Hinglish.

@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ client_name }} — {{ report_month_label }} YouTube Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --bg: #f8fafc;
+      --accent: #1d4ed8;
+      --accent-2: #2563eb;
+      --accent-soft: #eff6ff;
+      --warn: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 420px at 10% -10%, #dbeafe 0%, transparent 55%),
+        linear-gradient(180deg, #f1f5f9 0%, var(--bg) 240px);
+      line-height: 1.5;
+    }
+    .page { max-width: 960px; margin: 0 auto; padding: 32px 28px 56px; }
+    h1 { font-size: 30px; letter-spacing: -0.03em; margin: 4px 0 6px; font-weight: 700; }
+    h2 {
+      font-size: 15px;
+      margin: 28px 0 10px;
+      padding: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      font-weight: 700;
+      border: 0;
+    }
+    .eyebrow {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin: 0 0 22px;
+      background: rgba(255,255,255,0.65);
+    }
+    .kpi { padding: 16px 14px 18px; border-right: 1px solid var(--line); }
+    .kpi:last-child { border-right: 0; }
+    .kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+    .kpi .value { font-size: 24px; font-weight: 700; margin-top: 6px; letter-spacing: -0.02em; }
+    .kpi .delta { font-size: 12px; color: var(--accent-2); margin-top: 4px; font-weight: 500; }
+    .lead {
+      font-size: 16px;
+      margin: 0 0 14px;
+      max-width: 72ch;
+    }
+    .callout {
+      margin: 14px 0 18px;
+      padding: 0 0 0 14px;
+      border-left: 3px solid var(--accent);
+    }
+    .callout p, .milestone p { margin: 0; }
+    .milestone {
+      margin: 12px 0 18px;
+      padding: 0 0 0 14px;
+      border-left: 3px solid var(--warn);
+    }
+    p { margin: 0 0 10px; font-size: 14px; max-width: 78ch; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0 6px; }
+    th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .section-note { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px 16px;
+      margin-top: 8px;
+    }
+    .chart-block { break-inside: avoid; page-break-inside: avoid; }
+    .chart-block h3 {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      margin: 0 0 8px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .chart-wrap { position: relative; height: 220px; }
+    .chart-block.wide { grid-column: 1 / -1; }
+    .chart-block.wide .chart-wrap { height: 280px; }
+    @media print {
+      body { background: white; }
+      .page { max-width: none; padding: 10px; }
+      .chart-block { break-inside: avoid; }
+    }
+    @media (max-width: 720px) {
+      .kpis, .charts { grid-template-columns: 1fr 1fr; }
+      .kpi { border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="eyebrow">Monthly YouTube performance</div>
+    <h1>{{ client_name }}</h1>
+    <p class="sub">
+      {{ report_month_label }} ({{ date_range_current }})
+      · compared with {{ previous_month_label }}
+      · content window from {{ ai_start_label }}
+      · {{ channel_count }} channel{% if channel_count != 1 %}s{% endif %}
+    </p>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Views</div>
+        <div class="value">{{ fmt_int(current.views) }}</div>
+        {% if presentation.show_mom_views_delta %}
+        <div class="delta">{{ fmt_pct(mom.views_pct) }} vs prior month</div>
+        {% else %}
+        <div class="delta">{{ report_month_label }} total</div>
+        {% endif %}
+      </div>
+      <div class="kpi">
+        <div class="label">Watch time</div>
+        <div class="value">{{ fmt_int(current.estimatedMinutesWatched) }}m</div>
+        {% if presentation.show_mom_watch_delta %}
+        <div class="delta">{{ fmt_pct(mom.watch_pct) }} vs prior month</div>
+        {% else %}
+        <div class="delta">{{ report_month_label }} total</div>
+        {% endif %}
+      </div>
+      <div class="kpi">
+        <div class="label">Net subscribers</div>
+        <div class="value">{{ fmt_signed(current.netSubscribers) }}</div>
+        <div class="delta">{{ fmt_int(current.subscribersGained) }} gained · {{ fmt_int(current.subscribersLost) }} lost</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Videos with views</div>
+        <div class="value">{{ fmt_int(current.videosWithViews) }}</div>
+        {% if presentation.show_previous_month_section %}
+        <div class="delta">Prior month: {{ fmt_int(previous.videosWithViews) }}</div>
+        {% else %}
+        <div class="delta">{{ report_month_label }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <h2>Executive summary</h2>
+    <p class="lead">{{ narrative.executive_summary }}</p>
+
+    <div class="callout">
+      <p><strong>Highlight.</strong> {{ narrative.strong_callout }}</p>
+    </div>
+
+    {% if narrative.milestone_note %}
+    <div class="milestone">
+      <p><strong>Milestone.</strong> {{ narrative.milestone_note }}</p>
+    </div>
+    {% endif %}
+
+    {% if presentation.credit_top_overall_video and top_overall_video %}
+    <p class="lead" style="margin-top: 4px;">
+      <strong>Top video this month:</strong> {{ top_overall_video.title }}
+      ({{ fmt_int(top_overall_video.views) }} views{% if top_overall_video.channel_title %}, {{ top_overall_video.channel_title }}{% endif %}).
+    </p>
+    {% endif %}
+
+    <h2>Channel snapshot</h2>
+    <p>{{ narrative.channel_snapshot_blurb }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>{{ previous_month_label }} views</th>
+          <th>{{ report_month_label }} views</th>
+          <th>Watch (min)</th>
+          <th>Net subs</th>
+          <th>Videos w/ views</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ch in channels %}
+        <tr>
+          <td>{{ ch.title }}</td>
+          <td class="num">{{ fmt_int(ch.previous.views) }}</td>
+          <td class="num">{{ fmt_int(ch.current.views) }}</td>
+          <td class="num">{{ fmt_int(ch.current.estimatedMinutesWatched) }}</td>
+          <td class="num">{{ fmt_signed(ch.current.netSubscribers) }}</td>
+          <td class="num">{{ fmt_int(ch.current.videosWithViews) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if presentation.show_previous_month_section and narrative.previous_month_blurb %}
+    <h2>Previous-month comparison</h2>
+    <p>{{ narrative.previous_month_blurb }}</p>
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>{{ previous_month_label }}</th><th>{{ report_month_label }}</th><th>Change</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Views</td>
+          <td class="num">{{ fmt_int(previous.views) }}</td>
+          <td class="num">{{ fmt_int(current.views) }}</td>
+          <td class="num">{% if presentation.show_mom_views_delta %}{{ fmt_pct(mom.views_pct) }}{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Watch time (min)</td>
+          <td class="num">{{ fmt_int(previous.estimatedMinutesWatched) }}</td>
+          <td class="num">{{ fmt_int(current.estimatedMinutesWatched) }}</td>
+          <td class="num">{% if presentation.show_mom_watch_delta %}{{ fmt_pct(mom.watch_pct) }}{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Net subscribers</td>
+          <td class="num">{{ fmt_signed(previous.netSubscribers) }}</td>
+          <td class="num">{{ fmt_signed(current.netSubscribers) }}</td>
+          <td class="num">{% if presentation.show_mom_subs_delta %}{{ fmt_pct(mom.net_subs_pct) }}{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Videos with views</td>
+          <td class="num">{{ fmt_int(previous.videosWithViews) }}</td>
+          <td class="num">{{ fmt_int(current.videosWithViews) }}</td>
+          <td class="num">—</td>
+        </tr>
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if presentation.show_ai_section and narrative.ai_vs_old_story %}
+    <h2>{% if presentation.show_ai_vs_normal_table and ai_compare.show_section %}AI videos vs normal videos{% else %}AI videos{% endif %}</h2>
+    <p class="section-note">
+      AI window from {{ ai_start_label }} · {{ report_month_label }}
+      {% if presentation.show_ai_vs_normal_table and ai_compare.show_section %} · comparison shows only metrics where AI leads{% endif %}
+    </p>
+    <p>{{ narrative.ai_vs_old_story }}</p>
+    {% if presentation.show_ai_vs_normal_table and ai_compare.show_section %}
+    <table>
+      <thead>
+        <tr>
+          <th>Group</th>
+          <th>Videos</th>
+          {% if ai_compare.show_views %}<th>Views</th>{% endif %}
+          {% if ai_compare.show_avg %}<th>Avg views</th>{% endif %}
+          {% if ai_compare.show_watch %}<th>Watch (min)</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AI videos (from {{ ai_start_label }})</td>
+          <td class="num">{{ fmt_int(ai.videoCount) }}</td>
+          {% if ai_compare.show_views %}<td class="num">{{ fmt_int(ai.views) }}</td>{% endif %}
+          {% if ai_compare.show_avg %}<td class="num">{{ fmt_int(ai.avgViews) }}</td>{% endif %}
+          {% if ai_compare.show_watch %}<td class="num">{{ fmt_int(ai.estimatedMinutesWatched) }}</td>{% endif %}
+        </tr>
+        <tr>
+          <td>Normal videos (before {{ ai_start_label }})</td>
+          <td class="num">{{ fmt_int(old.videoCount) }}</td>
+          {% if ai_compare.show_views %}<td class="num">{{ fmt_int(old.views) }}</td>{% endif %}
+          {% if ai_compare.show_avg %}<td class="num">{{ fmt_int(old.avgViews) }}</td>{% endif %}
+          {% if ai_compare.show_watch %}<td class="num">{{ fmt_int(old.estimatedMinutesWatched) }}</td>{% endif %}
+        </tr>
+      </tbody>
+    </table>
+    {% endif %}
+    {% if top_ai_videos %}
+    <p class="section-note" style="margin-top: 12px;">Top AI videos in {{ report_month_label }}</p>
+    <table>
+      <thead>
+        <tr><th>Video</th><th>Channel</th><th>Views</th><th>Watch (min)</th></tr>
+      </thead>
+      <tbody>
+        {% for v in top_ai_videos %}
+        <tr>
+          <td>{{ v.title }}</td>
+          <td>{{ v.channel_title }}</td>
+          <td class="num">{{ fmt_int(v.views) }}</td>
+          <td class="num">{{ fmt_int(v.estimatedMinutesWatched) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% endif %}
+
+    <h2>Top videos — {{ report_month_label }}</h2>
+    <table>
+      <thead>
+        <tr><th>Video</th><th>Channel</th><th>Views</th><th>Format</th></tr>
+      </thead>
+      <tbody>
+        {% for v in top_videos %}
+        <tr>
+          <td>{{ v.title }}</td>
+          <td>{{ v.channel_title }}</td>
+          <td class="num">{{ fmt_int(v.views) }}</td>
+          <td>{{ v.duration_type }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if high_retention_videos and narrative.retention_story %}
+    <h2>High retention — {{ report_month_label }}</h2>
+    <p>{{ narrative.retention_story }}</p>
+    <table>
+      <thead>
+        <tr><th>Video</th><th>Channel</th><th>Views</th><th>Avg % viewed</th></tr>
+      </thead>
+      <tbody>
+        {% for v in high_retention_videos %}
+        <tr>
+          <td>{{ v.title }}</td>
+          <td>{{ v.channel_title }}</td>
+          <td class="num">{{ fmt_int(v.views) }}</td>
+          <td class="num">{{ '%.1f'|format(v.averageViewPercentage|float) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if top_by_channel %}
+    <h2>Top videos by channel — {{ report_month_label }}</h2>
+    <p class="section-note">Includes every linked channel so international performance is visible alongside the main channel.</p>
+    {% for block in top_by_channel %}
+      <p style="margin: 14px 0 4px; font-weight: 600;">{{ block.title }}</p>
+      <table>
+        <thead>
+          <tr><th>Video</th><th>Views</th><th>Watch (min)</th></tr>
+        </thead>
+        <tbody>
+          {% for v in block.videos[:6] %}
+          <tr>
+            <td>{{ v.title }}</td>
+            <td class="num">{{ fmt_int(v.views) }}</td>
+            <td class="num">{{ fmt_int(v.estimatedMinutesWatched) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="section-note">No video-level rows for this month.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+    {% endif %}
+
+    <h2>Organic / Suggested traffic</h2>
+    <p>{{ narrative.organic_traffic_story }}</p>
+    {% if traffic_sources %}
+    <table>
+      <thead>
+        <tr><th>Source</th><th>Views</th><th>Watch (min)</th></tr>
+      </thead>
+      <tbody>
+        {% for t in traffic_sources[:8] %}
+        <tr>
+          <td>{{ t.source }}</td>
+          <td class="num">{{ fmt_int(t.views) }}</td>
+          <td class="num">{{ fmt_int(t.estimatedMinutesWatched) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <h2>Subscriber impact</h2>
+    <p>{{ narrative.subscriber_story }}</p>
+
+    <h2>Analytics graphs</h2>
+    <p class="section-note">Chart appendix from the same cached metrics — channel splits included.</p>
+    <div class="charts" id="charts-root"></div>
+  </div>
+
+  <script>
+    window.__REPORT_CHARTS__ = {{ charts_json | safe }};
+    (function () {
+      const charts = window.__REPORT_CHARTS__ || [];
+      const root = document.getElementById('charts-root');
+      const palette = ['#1d4ed8', '#0ea5e9', '#312e81', '#38bdf8', '#1e3a8a', '#60a5fa'];
+      charts.forEach(function (cfg, idx) {
+        const block = document.createElement('div');
+        const wide = cfg.horizontal || cfg.type === 'line' || (cfg.datasets && cfg.datasets.length > 1);
+        block.className = 'chart-block' + (wide ? ' wide' : '');
+        block.innerHTML = '<h3></h3><div class="chart-wrap"><canvas></canvas></div>';
+        block.querySelector('h3').textContent = cfg.title || ('Chart ' + (idx + 1));
+        root.appendChild(block);
+        const ctx = block.querySelector('canvas').getContext('2d');
+        const datasets = (cfg.datasets || []).map(function (ds, i) {
+          return {
+            label: ds.label || '',
+            data: ds.data || [],
+            backgroundColor: palette[i % palette.length] + 'cc',
+            borderColor: palette[i % palette.length],
+            borderWidth: 2,
+            fill: cfg.type === 'line' ? false : true,
+            tension: 0.25,
+          };
+        });
+        new Chart(ctx, {
+          type: cfg.type || 'bar',
+          data: { labels: cfg.labels || [], datasets: datasets },
+          options: {
+            indexAxis: cfg.horizontal ? 'y' : 'x',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: datasets.length > 1 } },
+            scales: {
+              x: { grid: { color: '#eef2f6' }, ticks: { maxRotation: 0 } },
+              y: { grid: { color: '#eef2f6' }, beginAtZero: true },
+            },
+          },
+        });
+      });
+      window.__CHARTS_READY__ = true;
+    })();
+  </script>
+</body>
+</html>

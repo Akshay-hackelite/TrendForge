@@ -1,0 +1,21 @@
+Create a highly professional, square Instagram static post using DALL-E 3 (or the specified image generation model). The design must closely follow the provided visual guidelines.
+
+Inputs:
+- Approved post brief (contains exact text to use).
+- Client profile and branding guidelines.
+- Client reference images (for visual identity, layout, and typographic style).
+- Cached structured style profile and design markdown.
+- Optional few-shot quality references.
+
+Priority of Execution:
+1. Text Content: The approved post copy is authoritative and must be used exactly as provided.
+2. Visual Identity: Client reference images define the strict visual identity of the brand.
+3. Design Rules: The style profile and design markdown explain reusable design rules.
+4. Quality: Few-shot examples guide the overall quality and polish of the creative.
+
+Design & Typography Rules:
+- Text Accuracy: Use exactly the supplied image text. Do NOT invent additional factual or promotional claims. Do NOT copy text from the reference images.
+- Typography & Fonts: Pay extremely close attention to the typography in the reference images. You MUST replicate the font styles (serif, sans-serif, script, etc.), font sizes, font weights, and font capitalizations exactly as they appear in the client's reference designs.
+- Layout & Composition: Keep the layout clean, readable at mobile size, and strictly aligned with the visual hierarchy and composition habits demonstrated in the references.
+- Brand Integrity: Preserve the client's brand color palette meticulously.
+- Compliance: Do not imply any outcomes, guarantees, or urgency beyond what is explicitly stated in the approved brief.

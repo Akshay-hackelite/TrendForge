@@ -1,0 +1,11 @@
+Analyze the supplied recent Instagram reference posts for reusable brand style.
+
+Return two sections:
+1. A compact JSON object with colors, layout, typography, background, brand cues, text density, logo placement, and subject placement.
+2. A markdown design guide that can be reused for future image generation.
+
+Rules:
+- Describe visual system patterns, not the exact content of any one post.
+- Prefer repeated signals across the reference images.
+- Do not copy claims, captions, or unrelated text from reference posts.
+- Mark uncertain observations as uncertain.

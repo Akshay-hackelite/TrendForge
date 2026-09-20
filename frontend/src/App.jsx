@@ -37,7 +37,7 @@ import PocWeeklyTracker from './pages/PocWeeklyTracker'
 import TrackerClientSheet from './pages/TrackerClientSheet'
 import ClientVideos from './pages/ClientVideos'
 import ClientsIndex from './pages/ClientsIndex'
-import LoginPage from './pages/LoginPage'
+import AuthPage from './pages/AuthPage'
 
 function RequireAuth({ children }) {
   const { token, user, loading } = useAuth()
@@ -103,7 +103,8 @@ export default function App() {
     <>
       <OAuthSuccessHandler />
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
         <Route path="/admin" element={<AdminDashboard />} />
 
         <Route

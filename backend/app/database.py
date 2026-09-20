@@ -2643,12 +2643,18 @@ def update_monthly_report_fields(
 
 
 def seed_db() -> None:
-    if fetch_user("RipplicaTeam"):
+    from app.config import settings
+
+    username = (settings.SEED_DEMO_USERNAME or "").strip()
+    password = settings.SEED_DEMO_PASSWORD or ""
+    if not username or not password:
         return
-    hashed = bcrypt.hashpw("jaiHanuman".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    if fetch_user(username):
+        return
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     insert_user(
         {
-            "username": "RipplicaTeam",
+            "username": username,
             "hashed_password": hashed,
             "is_active": True,
             "active_client_id": None,

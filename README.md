@@ -27,7 +27,7 @@ make start-backend
 make start-frontend
 ```
 
-Demo login: `RipplicaTeam` / `jaiHanuman`
+Optional local demo login: set `SEED_DEMO_USERNAME` + `SEED_DEMO_PASSWORD` in `.env` (see `.env.example`). Leave empty in production.
 
 ## API (POST-only, dotted names)
 

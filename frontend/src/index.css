@@ -256,6 +256,24 @@ body {
     margin-bottom: 28px;
 }
 
+.auth-error {
+    color: #b91c1c;
+    font-size: 13px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+}
+
+.auth-switch {
+    margin-top: 20px;
+    margin-bottom: 0;
+    text-align: center;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
 /* Alert Notification Boxes */
 .alert {
     padding: 14px 16px;

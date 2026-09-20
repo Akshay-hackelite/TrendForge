@@ -36,13 +36,12 @@ export function AuthProvider({ children }) {
     refreshUser()
   }, [refreshUser])
 
-  const login = useCallback(async (username, password) => {
-    const data = await api.login(username, password)
-    localStorage.setItem('jwt_token', data.access_token)
-    setToken(data.access_token)
+  const establishSession = useCallback(async (accessToken) => {
+    localStorage.setItem('jwt_token', accessToken)
+    setToken(accessToken)
     setLoading(true)
     try {
-      const me = await api.me(data.access_token)
+      const me = await api.me(accessToken)
       setUser(me)
       return me
     } catch {
@@ -55,6 +54,23 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  const login = useCallback(
+    async (username, password) => {
+      const data = await api.login(username, password)
+      return establishSession(data.access_token)
+    },
+    [establishSession],
+  )
+
+  const register = useCallback(
+    async (username, password) => {
+      await api.register(username, password)
+      const data = await api.login(username, password)
+      return establishSession(data.access_token)
+    },
+    [establishSession],
+  )
+
   const patchUser = useCallback((patch) => {
     setUser((prev) => (prev ? { ...prev, ...patch } : prev))
   }, [])
@@ -65,13 +81,14 @@ export function AuthProvider({ children }) {
       user,
       loading,
       login,
+      register,
       logout,
       refreshUser,
       patchUser,
       activeClientId: user?.active_client_id ?? null,
       activeChannelId: user?.active_channel_id ?? null,
     }),
-    [token, user, loading, login, logout, refreshUser, patchUser],
+    [token, user, loading, login, register, logout, refreshUser, patchUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

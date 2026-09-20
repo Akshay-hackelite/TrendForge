@@ -2,7 +2,7 @@
 # https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: youtube-analytics-api
+    name: trendforge-api
     runtime: python
     rootDir: backend
     plan: free
@@ -28,10 +28,24 @@ services:
         sync: false
       - key: GOOGLE_REDIRECT_URI
         sync: false
+      - key: BASE_URL
+        sync: false
       - key: FRONTEND_URL
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: GCS_BUCKET_NAME
+        sync: false
+      - key: GCS_KEY_JSON
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SEED_DEMO_USERNAME
+        value: ""
+      - key: SEED_DEMO_PASSWORD
+        value: ""
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL

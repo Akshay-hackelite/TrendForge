@@ -1,9 +1,10 @@
-"""Internal admin dashboard endpoints — gated by a hardcoded password."""
+"""Internal admin dashboard endpoints — gated by ADMIN_PASSWORD env var."""
 
 from fastapi import APIRouter, HTTPException, status
 
 from app import schemas
 from app.auth import get_password_hash
+from app.config import settings
 from app.database import (
     COL_CHANNELS,
     COL_CLIENTS,
@@ -19,12 +20,15 @@ from app.database import (
 
 router = APIRouter(tags=["admin"])
 
-# Hardcoded internal admin password — change before any non-local use.
-ADMIN_PASSWORD = "gravityAdmin!2026"
-
 
 def _require_admin(admin_password: str) -> None:
-    if admin_password != ADMIN_PASSWORD:
+    expected = (settings.ADMIN_PASSWORD or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_PASSWORD is not configured on the server",
+        )
+    if admin_password != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid admin password",

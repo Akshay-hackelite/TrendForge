@@ -60,6 +60,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     user = fetch_user(token_data.username)
     if user is None:
         raise credentials_exception
+    if not user.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled",
+        )
     return user
 
 

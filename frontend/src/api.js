@@ -1,5 +1,5 @@
-/** API base: local http://localhost:8000, production https://api.xyz */
-const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+/** API base: local http://localhost:8000, production set VITE_API_URL */
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 function url(path) {
   return `${API_URL}${path}`
@@ -292,6 +292,8 @@ export const api = {
     form.append('password', password)
     return apiFetch('/auth.login', { form })
   },
+  register: (username, password) =>
+    apiFetch('/auth.register', { body: { username, password } }),
   me: (token) => apiFetch('/auth.me', { token }),
 
   listClients: (token) => apiFetch('/client.list', { token }),

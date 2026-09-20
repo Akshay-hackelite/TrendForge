@@ -1682,15 +1682,25 @@ async def social_festivals_get(
         current_post=None
     )
 
+def _require_cron_secret(request: Request) -> None:
+    expected = (settings.CRON_SECRET or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="CRON_SECRET is not configured on the server",
+        )
+    secret = request.headers.get("X-Cron-Secret")
+    if not secret or secret != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized cron trigger")
+
+
 @router.post("/cron/social.generate-festivals")
 async def cron_social_generate_festivals(request: Request):
     """
     The Generator Cron (1 AM): Its only job is to generate the image/caption and save it as a draft in your database. 
     It never publishes anything. It just prepares the post while everyone is sleeping so it's ready to go.
     """
-    secret = request.headers.get("X-Cron-Secret")
-    if not secret or secret != "gravity-cron-secret":
-        raise HTTPException(status_code=401, detail="Unauthorized cron trigger")
+    _require_cron_secret(request)
 
     ist_tz = timezone(timedelta(hours=5, minutes=30))
     tomorrow = datetime.now(ist_tz) + timedelta(days=1)
@@ -1904,9 +1914,7 @@ async def cron_social_publish_scheduled(request: Request, force: bool = False):
     """
     If force=true is passed, the cron script deliberately skips the "did we already post today?" check and runs anyway. However, after it successfully finishes publishing, it will still update the last_posted_date to the current timestampThis means the system stays perfectly consistent, but you, the developer, retain full manual override control!.
     """
-    secret = request.headers.get("X-Cron-Secret")
-    if not secret or secret != "gravity-cron-secret":
-        raise HTTPException(status_code=401, detail="Unauthorized cron trigger")
+    _require_cron_secret(request)
 
     ist_tz = timezone(timedelta(hours=5, minutes=30))
     today = datetime.now(ist_tz)

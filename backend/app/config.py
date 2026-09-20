@@ -27,10 +27,19 @@ class Settings(BaseSettings):
     MONGODB_URI: str = ""
     MONGODB_DB_NAME: str = "youtube_analytics"
 
-    # Google Cloud Storage
+    # Google Cloud Storage (optional locally; required on Render for uploads)
     GCS_BUCKET_NAME: str = ""
     GCS_KEY_JSON: str = ""
 
+    # Cron jobs (POST /cron/social.*) — set a long random string; scheduler sends X-Cron-Secret
+    CRON_SECRET: str = ""
+
+    # /admin dashboard gate (reset passwords, create users)
+    ADMIN_PASSWORD: str = ""
+
+    # Optional first-boot demo user (leave username empty in production)
+    SEED_DEMO_USERNAME: str = ""
+    SEED_DEMO_PASSWORD: str = ""
 
     # OpenAI — gpt-5.6-luna for all text tasks (extraction, mapping, generation)
     OPENAI_API_KEY: str = ""

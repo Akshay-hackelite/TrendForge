@@ -1,6 +1,6 @@
 # TrendForge — Deploy guide
 
-Stack: **Vercel** (frontend) + **Render** (FastAPI) + **MongoDB Atlas** (data) + optional **GCP Cloud Storage** (uploads) + **GitHub** (auto-deploy).
+Stack: **Vercel** (frontend) + **Render** (FastAPI) + **MongoDB Atlas** (data) + **Supabase Storage** (uploads, default) + **GitHub** (auto-deploy). GCS remains in code for a later paid switch.
 
 Repo: [Akshay-hackelite/TrendForge](https://github.com/Akshay-hackelite/TrendForge)
 
@@ -38,59 +38,59 @@ Collections created on first use: `users`, `clients`, `channels`, `videos`, `top
 
 ---
 
-## 2. Google Cloud Storage (your bucket)
+## 2. File storage (Supabase default, GCS switcher)
 
-Required on **Render** for Instagram images, PDFs, and other uploads. Local dev can skip GCS (falls back to disk; ephemeral on Render).
+Uploads (Instagram images, thumbnails, videos, PDFs) go through `STORAGE_BACKEND`:
 
-### 2a. Create GCP project + bucket
+| `STORAGE_BACKEND` | Where new files go |
+|-------------------|--------------------|
+| `supabase` (default) | Supabase Storage — no credit card, public URLs |
+| `gcs` | Google Cloud Storage — keep for later when you pay |
 
-1. [console.cloud.google.com](https://console.cloud.google.com/) → **New project** (e.g. `trendforge`).
-2. **APIs & Services → Enable APIs** → enable **Cloud Storage API**.
-3. **Cloud Storage → Buckets → Create**
-   - Name: globally unique, e.g. `trendforge-media-akshay`
-   - Location: region near you (e.g. `asia-south1`)
-   - Access control: **Uniform**
-   - **Create**
-4. **Public read for uploaded files** (Instagram/YouTube must fetch URLs):
-   - Bucket → **Permissions** → **Grant access**
-   - Principal: `allUsers`
-   - Role: **Storage Object Viewer**
-   - Or use a bucket policy that allows public read on object URLs the app returns (`https://storage.googleapis.com/BUCKET/...`).
+Mongo still stores a public HTTPS URL. Instagram/Facebook fetch that URL. Local disk is used only if cloud upload fails (fine locally; **not** enough on Render).
 
-### 2b. Service account + JSON key
+**Free-tier limit:** each file must be **50 MB or smaller** (1 GB total). Images, PDFs, and thumbnails are fine; large videos fail until you switch to `gcs` or upgrade Supabase.
 
-1. **IAM & Admin → Service Accounts → Create**
-   - Name: `trendforge-storage`
-2. **Keys → Add key → JSON** → download the file.
-3. **Bucket → Permissions** → grant that service account **Storage Object Admin** on the bucket.
+The Postgres **Data API** can stay off. Storage does not need it.
 
-### 2c. Put in `.env` / Render
+### 2a. Supabase Storage (what to use now)
 
-**Option A — inline JSON (Render-friendly):**
-
-Minify the JSON to one line:
-
-```bash
-python3 -c "import json; print(json.dumps(json.load(open('path/to/key.json'))))"
-```
-
-Set:
+1. [supabase.com/dashboard](https://supabase.com/dashboard) → **New project** (any region; Mumbai is fine). No credit card on the free plan.
+2. **Storage → New bucket**
+   - Name: `media` (or any name — must match `SUPABASE_BUCKET`)
+   - **Public bucket:** ON (Instagram must fetch the URL)
+   - Create
+3. **Project Settings → API**
+   - Copy **Project URL** → `SUPABASE_URL`
+   - Copy **service_role** (secret) → `SUPABASE_SERVICE_ROLE_KEY`
+   - Never use the **anon** key on the backend
 
 ```env
-GCS_BUCKET_NAME=trendforge-media-akshay
-GCS_KEY_JSON={"type":"service_account","project_id":"...",...}
+STORAGE_BACKEND=supabase
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_BUCKET=media
 ```
 
-**Option B — local file:** set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json` and leave `GCS_KEY_JSON` empty (local only).
+Public file URLs look like:
 
-### 2d. Rotate away from office bucket
+`https://YOUR_PROJECT.supabase.co/storage/v1/object/public/media/generated_images/foo.png`
 
-If `.env` still has an old bucket (e.g. `gravity-storage-0` / project `supdoc-*`):
+Folders in the bucket match the app: `generated_images`, `uploads`, `uploaded_videos`, `social_post_videos`, `weekly_tracker`, `thumbnails`, `reports`.
 
-1. Create **your** bucket + service account (above).
-2. Update `GCS_BUCKET_NAME` and `GCS_KEY_JSON` in `.env` and Render.
-3. In the **office** GCP project → **IAM → Service Accounts** → delete or rotate the old key you were using (so that credential stops working).
-4. Redeploy Render.
+### 2b. Switch back to GCS later (paid)
+
+GCS code stays in the repo. No caller rewrite needed.
+
+```env
+STORAGE_BACKEND=gcs
+GCS_BUCKET_NAME=your-paid-bucket
+GCS_KEY_JSON={"type":"service_account",...}
+```
+
+Restart the API. New uploads go to GCS. Old Supabase URLs in Mongo keep working. Deletes follow the URL host.
+
+Office `GCS_*` values can stay in `.env` unused while `STORAGE_BACKEND=supabase`.
 
 ---
 
@@ -196,8 +196,10 @@ Crons always target your **deployed** API URL, not localhost.
 | `OPENAI_API_KEY` | Your key |
 | `CRON_SECRET` | Random string (see §6) |
 | `ADMIN_PASSWORD` | Random string for `/admin` dashboard |
-| `GCS_BUCKET_NAME` | Your bucket name |
-| `GCS_KEY_JSON` | Service account JSON (one line) |
+| `STORAGE_BACKEND` | `supabase` (now) or `gcs` (later) |
+| `SUPABASE_URL` | `https://YOUR_PROJECT.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → `service_role` |
+| `SUPABASE_BUCKET` | Public bucket name, e.g. `media` |
 
 ### Render — recommended
 
@@ -248,7 +250,7 @@ Per-client Instagram app id/secret are stored in the DB (Settings), not env.
 |------|----------------|
 | **GitHub** | `Akshay-hackelite/TrendForge` ✅ |
 | **MongoDB** | Your Atlas URI + DB name; not office cluster |
-| **GCS** | Your bucket + service account; delete office SA key |
+| **File storage** | Supabase Storage (`STORAGE_BACKEND=supabase`); GCS code kept for later |
 | **Google OAuth** | Your client id/secret + production redirect URI |
 | **OpenAI / SerpApi** | Your API keys in Render + `.env` |
 | **CRON_SECRET** | New random string (was hardcoded `gravity-cron-secret`) |
@@ -276,14 +278,14 @@ If deploying fresh with empty `SEED_DEMO_USERNAME`, no demo user is created.
 - [ ] Login with **your** account (not shared demo creds)
 - [ ] `/admin` works with your `ADMIN_PASSWORD`
 - [ ] YouTube OAuth connect works
-- [ ] Upload test (social image) hits **your** GCS bucket
+- [ ] Upload test (social image) URL is `*.supabase.co/storage/v1/object/public/...` (not office GCS)
 - [ ] Atlas shows data under **your** database name
 - [ ] Cron test:
   ```bash
   curl -X POST "https://YOUR-SERVICE.onrender.com/cron/social.generate-festivals" \
     -H "X-Cron-Secret: YOUR_CRON_SECRET"
   ```
-- [ ] Office GCS key rotated/deleted in old GCP project
+- [ ] Office GCS is unused (`STORAGE_BACKEND=supabase`); rotate office SA key when ready
 
 ---
 
@@ -303,6 +305,6 @@ If deploying fresh with empty `SEED_DEMO_USERNAME`, no demo user is created.
 | Frontend | `make start-frontend` → :5173 | Vercel |
 | Backend | `make start-backend` → :8000 | Render |
 | Data | MongoDB Atlas (`MONGODB_URI`) | MongoDB Atlas |
-| Uploads | GCS optional (disk fallback) | GCS required |
+| Uploads | Supabase (`STORAGE_BACKEND=supabase`) or local disk fallback | Supabase required on Render |
 
 Put Atlas URI and secrets in repo-root `.env` and restart the API.

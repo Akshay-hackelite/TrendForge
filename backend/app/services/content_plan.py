@@ -540,16 +540,13 @@ def extra_keywords_for_refine(
     used_ids: set[str],
     *,
     keyword_analysis_by_id: dict[str, dict] | None = None,
-    limit: int = 8,
 ) -> list[dict]:
-    """Spare scored keywords the refine AI may swap in if the user prompt asks."""
+    """Every unused client keyword the refine AI may swap in if the user prompt asks."""
     analysis = keyword_analysis_by_id or {}
     pool = [
         t
         for t in topics
-        if t.get("id")
-        and t["id"] not in used_ids
-        and float(t.get("recommendation_score") or 0) >= SCORE_THRESHOLD
+        if t.get("id") and t["id"] not in used_ids
     ]
     pool.sort(
         key=lambda t: (
@@ -558,7 +555,7 @@ def extra_keywords_for_refine(
         )
     )
     extras: list[dict] = []
-    for topic in pool[: max(0, limit)]:
+    for topic in pool:
         row = analysis.get(topic["id"]) or {}
         extras.append(
             {
@@ -730,7 +727,6 @@ def generate_content_plan(
             topics,
             used_ids,
             keyword_analysis_by_id=analysis_by_id,
-            limit=8,
         )
     else:
         format_meta = _covered_format_meta(videos, coverage)

@@ -4,7 +4,7 @@ This is REFINE mode — not a fresh pick of topics.
 
 What you receive:
 - previous_items: the current plan (keywords + Long/Short + prior titles/types). KEEP this list as the base.
-- extra_keywords: a small spare pool. Use ONLY if the user_prompt asks to swap/replace a topic. Do not invent keywords outside previous_items + extra_keywords.
+- extra_keywords: every other keyword on this client (not already in previous_items). Use ONLY if the user_prompt asks to swap/replace a topic. Do not invent keywords outside previous_items + extra_keywords.
 - user_prompt: the instruction to apply (titles, tone, video_type, optional swaps).
 - video_types: catalog of allowed themes (pick a valid name matching Long/Short).
 - specialty / description: client context.

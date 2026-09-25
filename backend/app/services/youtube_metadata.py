@@ -8,7 +8,7 @@ from app.config import settings
 from app.services.topics import make_topic
 import httpx
 from pathlib import Path
-from app.services.gcs_storage import upload_bytes
+from app.services.storage import upload_bytes
 
 SOCIAL_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "social_assets"
 
@@ -381,7 +381,7 @@ def generate_youtube_thumbnail(prompt: str) -> str:
             public_url = upload_bytes("thumbnails", filename, image_bytes)
             return public_url
         except Exception as e:
-            print(f"GCS upload failed: {e}. Falling back to local disk.")
+            print(f"Cloud storage upload failed: {e}. Falling back to local disk.")
             SOCIAL_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
             path = SOCIAL_ASSETS_DIR / filename
             path.write_bytes(image_bytes)

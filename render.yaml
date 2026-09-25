@@ -38,6 +38,14 @@ services:
         sync: false
       - key: GCS_KEY_JSON
         sync: false
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: media
       - key: CRON_SECRET
         sync: false
       - key: ADMIN_PASSWORD

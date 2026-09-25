@@ -346,11 +346,45 @@ export default function ClientSocialGenerate() {
     }
   }
 
-  function handleConfirmRegenerate(post) {
-    const fields = { source_type: post.source_type }
+  async function handleConfirmRegenerate(post) {
+    const sourceType = post?.source_type
+    if (!sourceType) {
+      toast('This post is missing a source type.', 'error')
+      return
+    }
+    if (sourceType === 'script' && !post.content_plan_item_id) {
+      toast('This post is missing its content plan item.', 'error')
+      return
+    }
+    if ((sourceType === 'smart_pick' || sourceType === 'manual_pick') && !post.topic_id) {
+      toast('This post is missing its keyword.', 'error')
+      return
+    }
+
+    const fields = { source_type: sourceType }
     if (post.topic_id) fields.topic_id = post.topic_id
+    if (post.topic_text) fields.topic_text = post.topic_text
     if (post.content_plan_item_id) fields.content_plan_item_id = post.content_plan_item_id
-    handleGenerate(fields, regeneratePrompt)
+    if (post.generation_origin) fields.generation_origin = post.generation_origin
+    if (regeneratePrompt.trim()) fields.custom_prompt = regeneratePrompt.trim()
+    if (referenceImageUrls.trim()) fields.reference_image_urls = referenceImageUrls.trim()
+    if (selectedReferenceMediaIds.length > 0) {
+      fields.reference_media_ids = selectedReferenceMediaIds
+    }
+
+    setGenerating(true)
+    try {
+      const result = await api.generateSocialPostDraft(token, clientId, fields)
+      setDraft(result.post)
+      setSavedPosts((prev) => [result.post, ...prev.filter((p) => p.id !== result.post.id)])
+      setRegeneratingPostId(null)
+      setRegeneratePrompt('')
+      toast('Regenerated.', 'success')
+    } catch (err) {
+      toast(err.message, 'error')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   function handlePostToInsta(post) {
@@ -964,7 +998,17 @@ export default function ClientSocialGenerate() {
                       </div>
                       <div className="version-actions draft-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '0 16px 16px' }}>
                         {regeneratingPostId === post.id ? (
-                          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div
+                            style={{
+                              gridColumn: '1 / -1',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '8px',
+                              position: 'relative',
+                              zIndex: 2,
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <textarea
                               className="form-control"
                               placeholder="Optional custom instructions..."
@@ -984,7 +1028,10 @@ export default function ClientSocialGenerate() {
                               <button
                                 type="button"
                                 className="btn btn-primary btn-sm"
-                                onClick={() => handleRegeneratePost(post)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleConfirmRegenerate(post)
+                                }}
                                 disabled={generating}
                                 style={{ flex: 1 }}
                               >
@@ -993,7 +1040,10 @@ export default function ClientSocialGenerate() {
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                onClick={() => setRegeneratingPostId(null)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setRegeneratingPostId(null)
+                                }}
                                 disabled={generating}
                               >
                                 Cancel

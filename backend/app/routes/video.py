@@ -17,7 +17,7 @@ from app.database import (
     update_video_fields,
 )
 from app.google_oauth import get_user_google_creds
-from app.services.gcs_storage import upload_bytes
+from app.services.storage import StorageLimitError, upload_bytes
 from app.services.youtube_api import fetch_channel_analytics, sync_videos_from_youtube
 
 router = APIRouter(tags=["video"])
@@ -354,8 +354,10 @@ async def video_local_upload(
 
     try:
         public_url = upload_bytes("uploaded_videos", filename, content, content_type=stored_type)
+    except StorageLimitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        print(f"GCS upload failed: {exc}. Falling back to local disk.", flush=True)
+        print(f"Cloud storage upload failed: {exc}. Falling back to local disk.", flush=True)
         UPLOADED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
         (UPLOADED_VIDEOS_DIR / filename).write_bytes(content)
         base_url = settings.BASE_URL.rstrip("/")
@@ -458,11 +460,11 @@ def video_upload(
         ig_post_id = None
         fb_post_id = None
         if body.post_to_instagram or body.post_to_facebook:
-            from app.services.gcs_storage import upload_file
+            from app.services.storage import upload_file
             from app.services.youtube_metadata import generate_social_caption
             from app.routes.social import get_instagram_connection, get_facebook_connection
             
-            # Upload video to GCS for public URL
+            # Upload video to cloud storage for a public URL
             gcs_url = upload_file("social_post_videos", video_path, content_type="video/mp4")
             
             # Generate AI Caption

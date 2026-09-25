@@ -21,7 +21,7 @@ from app.database import (
     list_weekly_trackers_for_month,
     save_weekly_tracker,
 )
-from app.services.gcs_storage import upload_bytes
+from app.services.storage import StorageLimitError, upload_bytes
 
 router = APIRouter(tags=["weekly-tracker"])
 
@@ -715,8 +715,10 @@ async def weekly_tracker_file_upload(
     gcs_folder = "uploaded_videos" if target == "video_url" else "weekly_tracker"
     try:
         public_url = upload_bytes(gcs_folder, filename, content, content_type=content_type)
+    except StorageLimitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        print(f"GCS upload failed: {exc}. Falling back to local disk.", flush=True)
+        print(f"Cloud storage upload failed: {exc}. Falling back to local disk.", flush=True)
         if target == "video_url":
             UPLOADED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
             path = UPLOADED_VIDEOS_DIR / filename

@@ -17,6 +17,7 @@ import {
 } from './trackerUtils'
 
 const VIDEO_ACCEPT = 'video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm'
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
 function AssetRow({ label, value, onSave, section }) {
   const [editing, setEditing] = useState(false)
@@ -53,6 +54,10 @@ function VideoAssetRow({ card, value, onSave, weekContext }) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !token || !clientId) return
+    if (file.size > MAX_VIDEO_BYTES) {
+      toast('Video must be 50 MB or smaller.', 'error')
+      return
+    }
     setUploading(true)
     try {
       const result = await api.uploadWeeklyTrackerFile(
@@ -73,7 +78,7 @@ function VideoAssetRow({ card, value, onSave, weekContext }) {
   if (uploading) {
     return (
       <div className="tracker-asset-row is-video is-uploading" data-tracker-section="video">
-        <span className="tracker-kicker">Video for the client</span>
+        <span className="tracker-kicker">Video for the client <span className="tracker-file-limit">Max 50 MB</span></span>
         <em><i className="fa-solid fa-spinner fa-spin" /> Uploading…</em>
       </div>
     )
@@ -82,7 +87,7 @@ function VideoAssetRow({ card, value, onSave, weekContext }) {
   if (editing) {
     return (
       <div className="tracker-asset-row is-editing" data-tracker-section="video">
-        <span className="tracker-kicker">Video for the client</span>
+        <span className="tracker-kicker">Video for the client <span className="tracker-file-limit">Max 50 MB</span></span>
         <input className="form-control" autoFocus value={draft} placeholder="Paste Drive URL" onChange={(e) => setDraft(e.target.value)} />
         <button type="button" className="btn btn-primary btn-sm" onClick={() => { onSave(draft.trim()); setEditing(false) }}>Save</button>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDraft(value || ''); setEditing(false) }}>Cancel</button>
@@ -92,7 +97,7 @@ function VideoAssetRow({ card, value, onSave, weekContext }) {
 
   return (
     <div className="tracker-asset-row is-video" data-tracker-section="video">
-      <span className="tracker-kicker">Video for the client</span>
+      <span className="tracker-kicker">Video for the client <span className="tracker-file-limit">Max 50 MB</span></span>
       <em>{value || 'Not added yet — paste a link or upload'}</em>
       <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDraft(value || ''); setEditing(true) }}>
         Paste link

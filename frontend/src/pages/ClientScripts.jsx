@@ -583,7 +583,7 @@ export default function ClientScripts() {
             items={[
               { label: 'Clients', to: '/clients' },
               { label: client?.name || 'Client', to: `/clients/${clientId}` },
-              { label: 'Content Plan', to: `/clients/${clientId}/content-plan` },
+              { label: 'Content Plan', to: `/clients/${clientId}/videos/content-plan` },
               { label: 'Scripts' },
             ]}
           />
@@ -591,7 +591,7 @@ export default function ClientScripts() {
           <p>Review generated scripts, combined read-through, and AI narration</p>
         </div>
         <div className="header-actions plan-header-actions">
-          <Link to={`/clients/${clientId}/content-plan`} className="btn btn-secondary">
+          <Link to={`/clients/${clientId}/videos/content-plan`} className="btn btn-secondary">
             <i className="fa-solid fa-lightbulb" />
             Content Plan
           </Link>
@@ -778,7 +778,7 @@ export default function ClientScripts() {
               Generate titles on Content Plan, then run <strong>3. Generate scripts</strong>.
             </p>
           </div>
-          <Link to={`/clients/${clientId}/content-plan`} className="btn btn-primary">
+          <Link to={`/clients/${clientId}/videos/content-plan`} className="btn btn-primary">
             Go to Content Plan
           </Link>
         </section>

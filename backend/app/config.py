@@ -27,7 +27,15 @@ class Settings(BaseSettings):
     MONGODB_URI: str = ""
     MONGODB_DB_NAME: str = "youtube_analytics"
 
-    # Google Cloud Storage (optional locally; required on Render for uploads)
+    # File storage: "supabase" (default) or "gcs" (paid Google Cloud later)
+    STORAGE_BACKEND: str = "supabase"
+
+    # Supabase Storage. Bucket must be public for Instagram/Facebook.
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_BUCKET: str = "media"
+
+    # Google Cloud Storage — kept for later / mixed-history deletes
     GCS_BUCKET_NAME: str = ""
     GCS_KEY_JSON: str = ""
 

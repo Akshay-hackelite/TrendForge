@@ -42,7 +42,7 @@ from app.database import (
     save_facebook_oauth_state,
     save_social_post,
 )
-from app.services.gcs_storage import upload_bytes, delete_file
+from app.services.storage import delete_by_url, upload_bytes
 
 router = APIRouter(tags=["social"])
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -278,9 +278,8 @@ def _current_version(posts: list[dict]) -> dict | None:
 def _remove_local_social_asset(post: dict) -> None:
     image_url = post.get("image_url") or ""
     
-    if image_url.startswith("https://storage.googleapis.com/"):
-        blob_path = image_url.split("https://storage.googleapis.com/")[-1].split("/", 1)[-1]
-        delete_file(blob_path)
+    if image_url.startswith("http"):
+        delete_by_url(image_url)
         return
 
     prefix = "/social.asset/"
@@ -555,7 +554,7 @@ async def _generate_social_image(
         return public_url, payload
     except Exception as e:
         # Fallback to local if GCS fails or isn't configured
-        print(f"GCS upload failed: {e}. Falling back to local disk.")
+        print(f"Cloud storage upload failed: {e}. Falling back to local disk.")
         SOCIAL_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
         path = SOCIAL_ASSETS_DIR / filename
         path.write_bytes(image_bytes)
@@ -1066,7 +1065,7 @@ async def instagram_media_upload(
         public_url = upload_bytes("uploads", filename, content, content_type=file.content_type)
         return {"url": public_url}
     except Exception as e:
-        print(f"GCS upload failed: {e}. Falling back to local disk.")
+        print(f"Cloud storage upload failed: {e}. Falling back to local disk.")
         uploads_dir = SOCIAL_ASSETS_DIR / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
         path = uploads_dir / filename

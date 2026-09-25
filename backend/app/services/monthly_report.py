@@ -32,7 +32,7 @@ from app.services.monthly_report_render import (
     report_pdf_path,
     save_metrics_cache,
 )
-from app.services.gcs_storage import upload_file
+from app.services.storage import upload_file
 from app.services.openai_monthly_report import (
     apply_presentation_guards,
     generate_report_narrative,
@@ -157,10 +157,10 @@ def _render_and_store_artifacts(
         export_html_to_pdf(html, pdf_path)
         try:
             pdf_stored = upload_file("reports", pdf_path, content_type="application/pdf")
-            # Clean up the local temp file since it's safely in GCS now
+            # Clean up the local temp file since it's in cloud storage now
             pdf_path.unlink(missing_ok=True)
         except Exception as e:
-            print(f"[monthly-report] GCS upload failed: {e}. Storing local path instead.", flush=True)
+            print(f"[monthly-report] Cloud storage upload failed: {e}. Storing local path instead.", flush=True)
             pdf_stored = str(pdf_path)
     except Exception as exc:  # noqa: BLE001
         print(f"[monthly-report] PDF export failed: {exc}", flush=True)

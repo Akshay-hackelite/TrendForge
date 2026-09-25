@@ -4586,6 +4586,25 @@ a.plan-item-link {
     text-transform: uppercase;
     color: var(--primary);
     margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.tracker-file-limit {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--text-muted);
+    background: var(--bg-light, #f4f4f5);
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
 }
 
 .tracker-asset-row.is-editing {
@@ -4882,6 +4901,13 @@ a.plan-item-link {
 
 .video-url-attach {
     display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.video-url-attach-row {
+    display: flex;
     gap: 8px;
     align-items: stretch;
 }
@@ -4896,6 +4922,18 @@ a.plan-item-link {
     white-space: nowrap;
 }
 
+.video-url-attach-hint {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
+
+.video-url-attach-hint i {
+    margin-right: 6px;
+    opacity: 0.75;
+}
+
 @media (max-width: 720px) {
     .tracker-yt-preview {
         flex-direction: column;
@@ -4907,7 +4945,7 @@ a.plan-item-link {
         max-width: none;
     }
 
-    .video-url-attach {
+    .video-url-attach-row {
         flex-direction: column;
     }
 }

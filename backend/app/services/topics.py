@@ -36,9 +36,14 @@ WEIGHT_POINTS = {"high": 50, "medium": 30, "low": 10}
 SCORE_FIELDS = TREND_FIELDS + RECOMMENDATION_FIELDS
 
 USER_AGENT = (
-    "Mozilla/5.0 (compatible; GravityClientBot/1.0; +https://localhost) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+FETCH_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # Path segments that mark blog / article / news content — skip these URLs
 BLOG_PATH_MARKERS = (
@@ -249,10 +254,12 @@ def is_blog_or_article_url(url: str) -> bool:
 
 def _fetch_text(client: httpx.Client, url: str) -> str | None:
     try:
-        response = client.get(url, headers={"User-Agent": USER_AGENT})
+        response = client.get(url, headers=FETCH_HEADERS)
         response.raise_for_status()
         return response.text
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        print(f"[topics:sitemap] fetch error {url} status={status} {exc}", flush=True)
         return None
 
 
@@ -349,7 +356,9 @@ def collect_sitemap_urls(
     skipped_blog_urls: list[str] = []
 
     try:
-        with httpx.Client(follow_redirects=True, timeout=20.0) as client:
+        with httpx.Client(
+            follow_redirects=True, timeout=20.0, headers=FETCH_HEADERS
+        ) as client:
             print(f"[topics:sitemap] discover seeds for {url!r} …", flush=True)
             seed_sitemaps = _discover_sitemap_urls(client, url)
             print(f"[topics:sitemap] seeds={len(seed_sitemaps)}", flush=True)

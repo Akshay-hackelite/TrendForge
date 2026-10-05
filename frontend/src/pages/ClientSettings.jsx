@@ -317,18 +317,27 @@ export default function ClientSettings() {
       }
       if (data.website_url) setWebsiteUrl(data.website_url)
       if (data.specialty) setSpecialty(data.specialty)
-      if (data.suggested_topics?.length) mergeAutoTopics(data.suggested_topics)
       setScrapeHint({
         title: data.page_title,
         snippet: data.openai_rationale || data.page_snippet,
         pages: data.pages_scraped,
       })
-      toast(
-        data.specialty
-          ? `Saved profile · detected niche: ${data.specialty}`
-          : 'Website saved and scraped — review topic buckets',
-        'success',
-      )
+      if (data.suggested_topics?.length) {
+        mergeAutoTopics(data.suggested_topics)
+        toast(
+          data.specialty
+            ? `Saved profile · detected niche: ${data.specialty}`
+            : 'Website saved and scraped — review topic buckets',
+          'success',
+        )
+      } else {
+        toast(
+          data.page_snippet
+            || data.openai_rationale
+            || 'Scrape finished with 0 keywords. Check the website URL or try again.',
+          'error',
+        )
+      }
     } catch (err) {
       toast(err.message, 'error')
     } finally {

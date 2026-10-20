@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import api from '../../api'
+import CaptionCount, { captionTooLong } from '../CaptionCount'
 
 function assetUrl(path) {
   if (!path) return ''
@@ -163,6 +164,10 @@ export default function TrackerStaticGenerate({ card, weekContext, onChange }) {
   }
 
   async function handleSaveCaption(post) {
+    if (captionTooLong(captionDraft)) {
+      toast('Caption is over Instagram’s 2,200 character limit. Shorten it before posting.', 'error')
+      return
+    }
     try {
       const result = await api.editSocialPostQueueCaption(token, clientId, post.id, captionDraft)
       setPosts((prev) => prev.map((p) => (p.id === post.id ? result.post : p)))
@@ -211,6 +216,10 @@ export default function TrackerStaticGenerate({ card, weekContext, onChange }) {
   }
 
   function handlePublish(post) {
+    if (captionTooLong(post.brief?.caption)) {
+      toast('Caption is over Instagram’s 2,200 character limit. Shorten it before posting.', 'error')
+      return
+    }
     if (!targets.length) {
       toast('Select Instagram or Facebook.', 'error')
       return
@@ -473,8 +482,9 @@ export default function TrackerStaticGenerate({ card, weekContext, onChange }) {
                   {editingCaptionId === post.id && (
                     <div className="tracker-inline-panel">
                       <textarea className="form-control" rows={3} value={captionDraft} onChange={(e) => setCaptionDraft(e.target.value)} />
+                      <CaptionCount value={captionDraft} />
                       <div className="tracker-note-actions">
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => handleSaveCaption(post)}>Save caption</button>
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => handleSaveCaption(post)} disabled={captionTooLong(captionDraft)}>Save caption</button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingCaptionId(null)}>Cancel</button>
                       </div>
                     </div>

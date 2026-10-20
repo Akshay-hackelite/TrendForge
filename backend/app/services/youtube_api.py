@@ -378,6 +378,106 @@ def fetch_video_snippets(creds, video_ids: list[str]) -> dict[str, dict]:
         print(f"[youtube] fetch_video_snippets failed: {exc}", flush=True)
     return out
 
+
+YT_TITLE_MAX = 100
+YT_DESCRIPTION_MAX = 5000
+YT_TAG_MAX = 100
+YT_TAGS_TOTAL_MAX = 500
+IG_CAPTION_MAX = 2200
+FB_DESCRIPTION_MAX = 63206
+
+
+def clamp_text(value: str | None, limit: int) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip()
+
+
+def sanitize_youtube_tags(tags: list | None) -> list[str]:
+    cleaned: list[str] = []
+    total = 0
+    for raw in tags or []:
+        tag = str(raw or "").replace("#", " ")
+        for char in "<>\"'`," :
+            tag = tag.replace(char, " ")
+        tag = " ".join(tag.split())
+        if not tag:
+            continue
+        if len(tag) > YT_TAG_MAX:
+            tag = tag[:YT_TAG_MAX].rstrip()
+        if not tag:
+            continue
+        extra = len(tag) + (1 if cleaned else 0)
+        if total + extra > YT_TAGS_TOTAL_MAX:
+            break
+        cleaned.append(tag)
+        total += extra
+    return cleaned
+
+
+def fit_social_caption(caption: str | None) -> str:
+    return clamp_text(caption, min(IG_CAPTION_MAX, FB_DESCRIPTION_MAX))
+
+
+def youtube_upload_body(title: str, description: str, tags: list | None, channel_id: str) -> dict:
+    safe_title = clamp_text(title, YT_TITLE_MAX).strip() or "Untitled"
+    snippet = {
+        "title": safe_title,
+        "description": clamp_text(description, YT_DESCRIPTION_MAX),
+        "categoryId": "22",
+        "channelId": channel_id,
+    }
+    safe_tags = sanitize_youtube_tags(tags)
+    if safe_tags:
+        snippet["tags"] = safe_tags
+    return {
+        "snippet": snippet,
+        "status": {
+            "privacyStatus": "public",
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+
+def publish_platforms(*, post_to_youtube: bool, post_to_instagram: bool, post_to_facebook: bool):
+    return bool(post_to_youtube), bool(post_to_instagram), bool(post_to_facebook)
+
+
+def _youtube_failure_detail(exc: Exception) -> str:
+    reason = exc.reason if isinstance(exc, HttpError) and hasattr(exc, "reason") else str(exc)
+    text = str(reason)
+    if "timeout" in text.lower() or "timed out" in text.lower():
+        return "YouTube upload timed out"
+    if isinstance(exc, HttpError):
+        return f"YouTube Upload API Error: {text}"
+    return text
+
+
+def _wait_youtube_processed(youtube, video_id: str) -> None:
+    """Poll until YouTube finishes processing. Upload-complete is not live."""
+    import time
+
+    deadline = time.time() + 20 * 60
+    while time.time() < deadline:
+        response = youtube.videos().list(part="processingDetails", id=video_id).execute()
+        items = response.get("items") or []
+        details = (items[0].get("processingDetails") or {}) if items else {}
+        state = str(details.get("processingStatus") or "").lower()
+        if state in {"succeeded", "complete"}:
+            return
+        if state in {"failed", "terminated"}:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"YouTube processing failed: {details}",
+            )
+        time.sleep(8)
+    raise HTTPException(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        detail="YouTube upload timed out",
+    )
+
+
 def upload_video_to_youtube(
     creds,
     channel_id: str,
@@ -385,30 +485,21 @@ def upload_video_to_youtube(
     title: str,
     description: str,
     tags: list[str],
-    thumbnail_path: str = None
+    thumbnail_path: str = None,
+    on_progress=None,
+    on_processing=None,
 ) -> str:
     """
-    Uploads a video to YouTube, and sets the thumbnail if provided.
+    Uploads a video to YouTube in 8 MB chunks, waits until processing finishes,
+    and sets the thumbnail if provided.
     Returns the uploaded YouTube Video ID.
     """
     try:
         youtube = build("youtube", "v3", credentials=creds)
 
-        body = {
-            "snippet": {
-                "title": title,
-                "description": description,
-                "tags": tags,
-                "categoryId": "22",  # People & Blogs as default
-                "channelId": channel_id
-            },
-            "status": {
-                "privacyStatus": "public",  # Upload as public per user request
-                "selfDeclaredMadeForKids": False
-            }
-        }
+        body = youtube_upload_body(title, description, tags, channel_id)
 
-        media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
+        media = MediaFileUpload(video_path, chunksize=8 * 1024 * 1024, resumable=True)
         request = youtube.videos().insert(
             part="snippet,status",
             body=body,
@@ -416,10 +507,20 @@ def upload_video_to_youtube(
         )
 
         response = None
+        last_percent = -1
         while response is None:
             status_obj, response = request.next_chunk()
+            if status_obj is not None and on_progress:
+                percent = int(status_obj.progress() * 100)
+                if percent != last_percent:
+                    last_percent = percent
+                    on_progress(percent)
 
         video_id = response.get("id")
+        if video_id and on_processing:
+            on_processing()
+        if video_id:
+            _wait_youtube_processed(youtube, video_id)
 
         if video_id and thumbnail_path:
             # Check size and compress if > 2MB
@@ -447,8 +548,14 @@ def upload_video_to_youtube(
             ).execute()
 
         return video_id
+    except HTTPException:
+        raise
     except HttpError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"YouTube Upload API Error: {e.reason if hasattr(e, 'reason') else str(e)}",
-        )
+            detail=_youtube_failure_detail(e),
+        ) from e
+    except Exception as e:
+        detail = _youtube_failure_detail(e)
+        code = status.HTTP_504_GATEWAY_TIMEOUT if detail == "YouTube upload timed out" else status.HTTP_502_BAD_GATEWAY
+        raise HTTPException(status_code=code, detail=detail) from e

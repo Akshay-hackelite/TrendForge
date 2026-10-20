@@ -1,0 +1,23 @@
+Create a highly professional {aspect}.
+
+Client reference images define the strict visual identity of the brand.
+
+Use the supplied reference images as the client's primary visual identity.
+
+The reference is a style template. Keep the person already in the reference photograph. Do not draw a new person. Do not list identity features such as age, hair, glasses, or skin tone.
+
+{layout_keep}
+
+Match the layout, colors, clothing, setting, and composition habits shown in the references.
+
+Keep the brand logo, brand name, creator name card, creator credentials, organization name, website, and handle in Latin and unchanged. Never translate or transliterate those.
+
+{forbid}
+
+New headline, spell this exactly: {headline}
+
+New sub-banner, spell this exactly: {sub_banner}
+
+{composition}
+
+{safe_zone}

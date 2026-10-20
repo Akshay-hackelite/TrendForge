@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from app import schemas
 from app.auth import get_current_user
 from app.config import settings
+from app.services.youtube_api import IG_CAPTION_MAX, fit_social_caption
 from app.database import (
     delete_social_post,
     fetch_client_bundle,
@@ -239,6 +240,7 @@ async def _build_brief(
         except Exception as e:
             print(f"Failed to generate brief via AI: {e}")
 
+    brief["caption"] = fit_social_caption(brief.get("caption"))
     return brief
 
 
@@ -1318,6 +1320,37 @@ async def social_post_draft_generate(
     post = save_social_post(post_id, payload)
     post = mark_social_post_selected(post_id) or post
     return schemas.SocialPostDraftResponse(post=schemas.SocialPostDraft(**post))
+
+
+def _public_social_image_url(image_url: str, host: str) -> str:
+    """Keep an already-public URL. Prefix only a local /social.asset path."""
+    url = str(image_url or "").strip()
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    base = str(host or "").rstrip("/")
+    if url.startswith("/social.asset/"):
+        return f"{base}/api{url}"
+    if url.startswith("/"):
+        return f"{base}{url}"
+    return url
+
+
+def _queue_should_publish(schedule: dict | None, today: datetime) -> bool:
+    """Frequency Off or empty skips the queue. Backups are not a schedule."""
+    freq = str((schedule or {}).get("frequency") or "").strip().lower()
+    if not freq or freq == "off":
+        return False
+    days = (schedule or {}).get("selected_days") or []
+    day_name = today.strftime("%A")
+    if freq == "daily":
+        return True
+    if freq == "weekdays":
+        return today.weekday() < 5
+    if freq in {"once_a_week", "twice_a_week"}:
+        return day_name in days
+    return False
+
+
 @router.post("/social.post.publish")
 async def social_post_publish(
     request: Request,
@@ -1328,6 +1361,12 @@ async def social_post_publish(
     
     if not body.targets:
         body.targets = ["instagram"]
+
+    if len(body.caption or "") > IG_CAPTION_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail="Caption must be 2200 characters or fewer for Instagram.",
+        )
         
     if "instagram" in body.targets:
         _require_instagram_connection(body.client_id)
@@ -1348,19 +1387,11 @@ async def social_post_publish(
     access_token = conn["access_token"]
     ig_user_id = conn["instagram_user_id"]
     
-    # Construct full public URL for the image
-    # Use the domain from BASE_URL (which could be an ngrok URL in local testing)
-    # If it's already a full URL (like GCS), use it directly
-    if image_url_path.startswith("http"):
-        full_image_url = image_url_path
-    else:
-        # Fallback for local assets
-        base_url = settings.BASE_URL.rstrip('/')
-        if "api" not in image_url_path:
-            full_image_url = f"{base_url}/api{image_url_path}"
-        else:
-            full_image_url = f"{base_url}{image_url_path}"
-        
+    # Absolute storage URLs (Supabase or GCS) stay unchanged. "api" inside
+    # googleapis used to look like a prefix and glued the app host onto the URL.
+    base_url = settings.BASE_URL.rstrip("/")
+    full_image_url = _public_social_image_url(image_url_path, base_url)
+    if not str(image_url_path).startswith("http"):
         # Bypass for local development using catbox.moe
         if "ngrok" in base_url or "localhost" in base_url:
             local_path = Path("social_assets") / Path(image_url_path).name
@@ -1391,7 +1422,7 @@ async def social_post_publish(
                 f"https://graph.instagram.com/{ig_user_id}/media",
                 data={
                     "image_url": full_image_url,
-                    "caption": body.caption,
+                    "caption": fit_social_caption(body.caption),
                     "access_token": access_token,
                 },
             )
@@ -1645,6 +1676,11 @@ async def social_post_queue_edit(
     current_user: dict = Depends(get_current_user),
 ):
     _require_client(current_user["username"], body.client_id)
+    if len(body.caption or "") > IG_CAPTION_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail="Caption must be 2200 characters or fewer for Instagram.",
+        )
     post = fetch_social_post(body.post_id)
     if not post or post.get("client_id") != body.client_id:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -1783,12 +1819,9 @@ async def _publish_post_internal(request: Request, cid: str, target_post: dict) 
             return False
             
         base_url = str(request.base_url).rstrip("/")
-        if "api" not in image_url_path:
-            full_image_url = f"{base_url}/api{image_url_path}"
-        else:
-            full_image_url = f"{base_url}{image_url_path}"
-            
-        if "ngrok" in base_url or "localhost" in base_url:
+        full_image_url = _public_social_image_url(image_url_path, base_url)
+
+        if not str(image_url_path).startswith("http") and ("ngrok" in base_url or "localhost" in base_url):
             from pathlib import Path
             local_path = Path("social_assets") / Path(image_url_path).name
             if local_path.exists():
@@ -1821,7 +1854,7 @@ async def _publish_post_internal(request: Request, cid: str, target_post: dict) 
                         f"https://graph.instagram.com/{ig_user_id}/media",
                         data={
                             "image_url": full_image_url,
-                            "caption": target_post.get("brief", {}).get("caption", ""),
+                            "caption": fit_social_caption(target_post.get("brief", {}).get("caption", "")),
                             "access_token": access_token,
                         },
                     )
@@ -1917,7 +1950,6 @@ async def cron_social_publish_scheduled(request: Request, force: bool = False):
 
     ist_tz = timezone(timedelta(hours=5, minutes=30))
     today = datetime.now(ist_tz)
-    day_name = today.strftime("%A")
     published_count = 0
 
     clients = fetch_all_clients()
@@ -1965,21 +1997,7 @@ async def cron_social_publish_scheduled(request: Request, force: bool = False):
                     flush=True,
                 )
                     
-        if schedule.get("frequency") in ["off", None]:
-            continue
-            
-        freq = schedule.get("frequency")
-        days = schedule.get("selected_days", [])
-        
-        should_publish = False
-        if freq == "daily":
-            should_publish = True
-        elif freq == "weekdays" and today.weekday() < 5:
-            should_publish = True
-        elif freq in ["once_a_week", "twice_a_week"] and day_name in days:
-            should_publish = True
-            
-        if not should_publish:
+        if not _queue_should_publish(schedule, today):
             continue
             
         last_posted = schedule.get("last_posted_date")

@@ -170,9 +170,11 @@ export default function TrackerCard({
   languages,
   weekContext,
   scriptedItems = [],
+  titleOptions = [],
   scriptBusy = false,
   onPickScript,
   onSaveScriptText,
+  onSaveManualScript,
   onChange,
   onStart,
   onAddSameType,
@@ -231,9 +233,25 @@ export default function TrackerCard({
         <Grip onDragStart={onDragStart} onDragEnd={onDragEnd} label={dragLabel} />
         <span className={`tracker-pill ${TYPE_PILL[card.type]}`}>{TYPE_LABELS[card.type]}</span>
         <strong className="tracker-collapsed-title">{card.title || 'Untitled'}</strong>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange({ ...card, collapsed: false })}>
-          Expand
-        </button>
+        <div className="tracker-head-actions">
+          <button type="button" className="tracker-icon-btn" data-tip="Duplicate" onClick={onAddSameType}>
+            <i className="fa-solid fa-clone" />
+          </button>
+          <button type="button" className="tracker-icon-btn" data-tip="Expand" onClick={() => onChange({ ...card, collapsed: false })}>
+            <i className="fa-solid fa-chevron-down" />
+          </button>
+          {confirmRemove ? (
+            <div className="tracker-card-confirm">
+              <span>Remove this card?</span>
+              <button type="button" className="btn btn-success btn-sm" onClick={() => { setConfirmRemove(false); onRemove() }}>Remove</button>
+              <button type="button" className="btn btn-danger-confirm btn-sm" onClick={() => setConfirmRemove(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className="tracker-icon-btn" data-tip="Delete" onClick={() => setConfirmRemove(true)}>
+              <i className="fa-solid fa-trash" />
+            </button>
+          )}
+        </div>
       </div>
     )
   }
@@ -250,11 +268,11 @@ export default function TrackerCard({
           onChange={(e) => onChange({ ...card, title: e.target.value })}
         />
         <div className="tracker-head-actions">
-          <button type="button" className="tracker-icon-btn" title="Add another" onClick={onAddSameType}>
-            <i className="fa-solid fa-plus" />
+          <button type="button" className="tracker-icon-btn" data-tip="Duplicate" onClick={onAddSameType}>
+            <i className="fa-solid fa-clone" />
           </button>
-          <button type="button" className="tracker-icon-btn" title="Collapse" onClick={() => onChange({ ...card, collapsed: true })}>
-            <i className="fa-regular fa-square" />
+          <button type="button" className="tracker-icon-btn" data-tip="Collapse" onClick={() => onChange({ ...card, collapsed: true })}>
+            <i className="fa-solid fa-chevron-up" />
           </button>
           {confirmRemove ? (
             <div className="tracker-card-confirm">
@@ -263,8 +281,8 @@ export default function TrackerCard({
               <button type="button" className="btn btn-danger-confirm btn-sm" onClick={() => setConfirmRemove(false)}>Cancel</button>
             </div>
           ) : (
-            <button type="button" className="tracker-icon-btn" title="Remove" onClick={() => setConfirmRemove(true)}>
-              <i className="fa-solid fa-xmark" />
+            <button type="button" className="tracker-icon-btn" data-tip="Delete" onClick={() => setConfirmRemove(true)}>
+              <i className="fa-solid fa-trash" />
             </button>
           )}
         </div>
@@ -289,9 +307,11 @@ export default function TrackerCard({
               <TrackerScriptSlot
                 card={card}
                 scriptedItems={scriptedItems}
+                titleOptions={titleOptions}
                 busy={scriptBusy}
                 onPick={onPickScript}
                 onSaveEdit={onSaveScriptText}
+                onSaveManual={onSaveManualScript}
               />
             </div>
             <div data-tracker-section="yt_metadata">

@@ -3,6 +3,23 @@ import api from '../../api'
 import { localeHasTitle, maybeAdvanceStage } from './trackerUtils'
 
 const PAGE_SIZE = 9
+const TITLE_MAX = 100
+const DESCRIPTION_MAX = 5000
+const TAGS_MAX = 500
+const TAG_MAX = 100
+
+function tagList(value) {
+  return String(value || '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+}
+
+function tagsInvalid(value) {
+  const tags = tagList(value)
+  if (tags.join(',').length > TAGS_MAX) return true
+  return tags.some((tag) => tag.length > TAG_MAX || /[#<>]/.test(tag))
+}
 
 export default function TrackerYtMetadata({ card, weekContext, onChange }) {
   const { token, clientId, toast, channels = [], reloadWeek } = weekContext
@@ -14,11 +31,25 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
   const [videoPage, setVideoPage] = useState(1)
   const [selectedRefIds, setSelectedRefIds] = useState([])
   const [refinePrompt, setRefinePrompt] = useState('')
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [descriptionDraft, setDescriptionDraft] = useState('')
+  const [tagsDraft, setTagsDraft] = useState('')
+  const [savingDescription, setSavingDescription] = useState(false)
   const locales = card.yt_locales || {}
   const hasMeta = localeHasTitle(locales)
+  const previewLang = 'hinglish'
   const preview = locales.hinglish || Object.values(locales).find((loc) => loc?.yt_title) || {}
-  const linked = Boolean(card.content_plan_item_id)
-  const busy = generating || refining
+  const hasScript = Boolean(String(card.assets?.script_text || '').trim())
+  const busy = generating || refining || savingDescription
+  const format = card.type === 'short' ? 'Short' : 'Long'
+
+  useEffect(() => {
+    setEditingMeta(false)
+    setTitleDraft('')
+    setDescriptionDraft('')
+    setTagsDraft('')
+  }, [previewLang, card.id])
 
   useEffect(() => {
     if (!refChannelId && channels[0]?.id) setRefChannelId(channels[0].id)
@@ -41,6 +72,10 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
   }, [showRefs, refChannelId, loadVideos])
 
   const visibleVideos = useMemo(() => videos.slice(0, videoPage * PAGE_SIZE), [videos, videoPage])
+  const titleOver = titleDraft.length > TITLE_MAX
+  const descriptionOver = descriptionDraft.length > DESCRIPTION_MAX
+  const tagsOver = tagsInvalid(tagsDraft)
+  const saveDisabled = busy || !titleDraft.trim() || titleOver || descriptionOver || tagsOver
 
   function applyLocales(nextLocales) {
     onChange(maybeAdvanceStage({ ...card, yt_locales: nextLocales || {} }))
@@ -56,20 +91,44 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
   }
 
   async function handleGenerate() {
-    if (!linked) {
-      toast('Choose a generated script first.', 'error')
+    if (!hasScript) {
+      toast('Add a script first, then generate metadata here.', 'error')
       return
+    }
+    const manualScript = card.assets?.script_source === 'manual'
+      ? String(card.assets?.script_text || '').trim()
+      : ''
+    let topicId = card.topic_id
+    if (!card.content_plan_item_id && !topicId) {
+      topicId = crypto.randomUUID()
+      onChange({ ...card, topic_id: topicId })
     }
     setGenerating(true)
     let nextLocales = null
     try {
-      const data = await api.generateYouTubeMetadata(token, clientId, {
-        itemIds: [card.content_plan_item_id],
-        referenceVideoIds: selectedRefIds,
-        languages: ['hinglish'],
-      })
-      const item = (data.suggestions?.items || []).find((row) => row.id === card.content_plan_item_id)
-      nextLocales = item?.yt_locales || null
+      const data = card.content_plan_item_id
+        ? await api.generateYouTubeMetadata(token, clientId, {
+          itemIds: [card.content_plan_item_id],
+          referenceVideoIds: selectedRefIds,
+          languages: ['hinglish'],
+          scriptOverride: manualScript || undefined,
+          format,
+        })
+        : await api.generateYouTubeMetadata(token, clientId, {
+          itemIds: [],
+          referenceVideoIds: selectedRefIds,
+          languages: ['hinglish'],
+          scriptOverride: String(card.assets?.script_text || '').trim() || undefined,
+          topicId,
+          topicTitle: card.title,
+          format,
+        })
+      if (!card.content_plan_item_id) {
+        nextLocales = data.yt_locales || null
+      } else {
+        const item = (data.suggestions?.items || []).find((row) => row.id === card.content_plan_item_id)
+        nextLocales = item?.yt_locales || data.yt_locales || null
+      }
       toast('YouTube metadata generated.', 'success')
     } catch (err) {
       toast(err.message, 'error')
@@ -79,7 +138,7 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
   }
 
   async function handleRefine() {
-    if (!linked || !refinePrompt.trim()) {
+    if (!hasScript || !refinePrompt.trim()) {
       toast('Enter refine instructions.', 'error')
       return
     }
@@ -87,13 +146,20 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
     let nextLocales = null
     try {
       const data = await api.refineYouTubeMetadata(token, clientId, {
-        itemId: card.content_plan_item_id,
+        itemId: card.content_plan_item_id || undefined,
         userPrompt: refinePrompt,
         referenceVideoIds: selectedRefIds,
         language: 'hinglish',
+        topicId: card.content_plan_item_id ? undefined : card.topic_id,
+        topicTitle: card.title,
+        format,
       })
-      const item = (data.suggestions?.items || []).find((row) => row.id === card.content_plan_item_id)
-      nextLocales = item?.yt_locales || locales
+      if (data.yt_locales) {
+        nextLocales = data.yt_locales
+      } else {
+        const item = (data.suggestions?.items || []).find((row) => row.id === card.content_plan_item_id)
+        nextLocales = item?.yt_locales || locales
+      }
       setRefinePrompt('')
       toast('Metadata refined.', 'success')
     } catch (err) {
@@ -103,11 +169,42 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
     setRefining(false)
   }
 
+  function startMetaEdit() {
+    setTitleDraft(preview.yt_title || '')
+    setDescriptionDraft(preview.yt_description || '')
+    setTagsDraft((preview.yt_tags || []).map((tag) => String(tag).replace(/#/g, '')).join(', '))
+    setEditingMeta(true)
+  }
+
+  async function saveMetaEdit() {
+    if (!card.topic_id) {
+      toast('Choose a generated script first.', 'error')
+      return
+    }
+    setSavingDescription(true)
+    try {
+      const data = await api.updateYouTubeDescription(token, clientId, {
+        topicId: card.topic_id,
+        language: previewLang,
+        title: titleDraft.trim(),
+        description: descriptionDraft,
+        tags: tagList(tagsDraft),
+      })
+      setEditingMeta(false)
+      toast('Metadata saved.', 'success')
+      await refreshCardLocales(data.yt_locales)
+    } catch (err) {
+      toast(err.message, 'error')
+    } finally {
+      setSavingDescription(false)
+    }
+  }
+
   return (
     <section className="tracker-script-slot tracker-yt-meta">
       <div className="tracker-script-slot-head">
         <span className="tracker-kicker">YouTube metadata</span>
-        {linked ? (
+        {hasScript ? (
           <div className="tracker-script-slot-actions">
             <button
               type="button"
@@ -127,14 +224,14 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
                 <>
                   <i className="fa-solid fa-spinner fa-spin" /> Generating…
                 </>
-              ) : hasMeta ? 'Regenerate' : 'Generate'}
+              ) : hasMeta ? 'Regenerate metadata' : 'Generate metadata'}
             </button>
           </div>
         ) : null}
       </div>
 
-      {!linked ? (
-        <p className="tracker-hint">Choose a generated script first, then generate metadata here.</p>
+      {!hasScript ? (
+        <p className="tracker-hint">Add a script first, then generate metadata here.</p>
       ) : null}
 
       {showRefs && (
@@ -187,28 +284,65 @@ export default function TrackerYtMetadata({ card, weekContext, onChange }) {
               )}
             </div>
             <div className="tracker-yt-preview-copy">
-              <h4>{preview.yt_title}</h4>
-              <p>{preview.yt_description}</p>
-              {preview.yt_tags?.length ? (
-                <small>{preview.yt_tags.map((t) => String(t).replace(/#/g, '')).join(', ')}</small>
-              ) : null}
+              {editingMeta ? (
+                <>
+                  <label className="tracker-meta-field">
+                    <span>Title</span>
+                    <input className="form-control" value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} />
+                    <small className={`char-count${titleOver ? ' is-over' : ''}`}>{titleDraft.length} / {TITLE_MAX}</small>
+                  </label>
+                  <label className="tracker-meta-field">
+                    <span>Description</span>
+                    <textarea className="form-control" rows={5} value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} />
+                    <small className={`char-count${descriptionOver ? ' is-over' : ''}`}>{descriptionDraft.length} / {DESCRIPTION_MAX}</small>
+                  </label>
+                  <label className="tracker-meta-field">
+                    <span>Tags</span>
+                    <textarea className="form-control" rows={3} value={tagsDraft} onChange={(e) => setTagsDraft(e.target.value)} />
+                    <small className={`char-count${tagsOver ? ' is-over' : ''}`}>{tagList(tagsDraft).join(',').length} / {TAGS_MAX}</small>
+                  </label>
+                  <div className="tracker-script-slot-actions">
+                    <button type="button" className="btn btn-primary btn-sm" disabled={saveDisabled} onClick={saveMetaEdit}>
+                      {savingDescription ? 'Saving…' : 'Save'}
+                    </button>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setEditingMeta(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h4>
+                    {preview.yt_title}
+                    <button type="button" className="tracker-icon-btn" onClick={startMetaEdit} aria-label="Edit metadata">
+                      <i className="fa-solid fa-pencil" />
+                    </button>
+                  </h4>
+                  <p>{preview.yt_description}</p>
+                  {preview.yt_tags?.length ? (
+                    <small>{preview.yt_tags.map((t) => String(t).replace(/#/g, '')).join(', ')}</small>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
-          <div className="tracker-refine-row">
-            <input
-              className="form-control"
-              placeholder="E.g., Make the title more clickbait"
-              value={refinePrompt}
-              onChange={(e) => setRefinePrompt(e.target.value)}
-            />
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !refinePrompt.trim()} onClick={handleRefine}>
-              {refining ? (
-                <>
-                  <i className="fa-solid fa-spinner fa-spin" /> Refine
-                </>
-              ) : 'Refine'}
-            </button>
-          </div>
+          {!editingMeta && (
+            <div className="tracker-refine-row">
+              <input
+                className="form-control"
+                placeholder="E.g., Make the title more clickbait"
+                value={refinePrompt}
+                onChange={(e) => setRefinePrompt(e.target.value)}
+              />
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy || !refinePrompt.trim()} onClick={handleRefine}>
+                {refining ? (
+                  <>
+                    <i className="fa-solid fa-spinner fa-spin" /> Refine
+                  </>
+                ) : 'Refine'}
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>

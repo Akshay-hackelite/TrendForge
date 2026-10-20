@@ -35,7 +35,14 @@ def upload_bytes(folder: str, filename: str, data: bytes, content_type: str = "i
     return f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/{blob_path}"
 
 
-def upload_file(folder: str, local_path: Path | str, content_type: str = "application/pdf") -> str:
+def upload_file(
+    folder: str,
+    local_path: Path | str,
+    content_type: str = "application/pdf",
+    *,
+    on_progress=None,
+    allow_large: bool = False,
+) -> str:
     """Upload a local file to GCS and return the public URL."""
     if not settings.GCS_BUCKET_NAME:
         raise ValueError("GCS_BUCKET_NAME is not set in config.")

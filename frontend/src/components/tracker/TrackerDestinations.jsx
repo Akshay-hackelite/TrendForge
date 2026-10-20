@@ -9,6 +9,34 @@ import {
   newId,
 } from './trackerUtils'
 
+function shortDestLabel(url) {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '')
+    if (host === 'youtu.be') {
+      const id = parsed.pathname.replace(/^\//, '').split('/')[0]
+      return id ? `youtu.be/${id}` : host
+    }
+    if (host.endsWith('youtube.com')) {
+      const id = parsed.searchParams.get('v') || parsed.pathname.split('/').filter(Boolean).pop()
+      return id ? `youtu.be/${id}` : host
+    }
+    if (host.endsWith('instagram.com')) {
+      const parts = parsed.pathname.split('/').filter(Boolean)
+      const code = parts[parts.length - 1] || ''
+      return code ? `instagram.com/…/${code}` : host
+    }
+    if (host.endsWith('facebook.com')) {
+      const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/, '')
+      const trimmed = path.length > 28 ? `…${path.slice(-24)}` : path
+      return trimmed || host
+    }
+  } catch {
+    // Keep a trimmed raw string when the cell is not a URL yet.
+  }
+  return url.length > 32 ? `${url.slice(0, 28)}…` : url
+}
+
 function DestinationCell({ dest, editingStructure, onSave, onRemove }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(dest.url || '')
@@ -44,12 +72,14 @@ function DestinationCell({ dest, editingStructure, onSave, onRemove }) {
   if (url) {
     return (
       <div className="tracker-dest-filled">
-        <a href={url} target="_blank" rel="noreferrer">{url}</a>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
-          Edit
+        <a href={url} target="_blank" rel="noreferrer" title={url}>{shortDestLabel(url)}</a>
+        <button type="button" className="tracker-icon-btn" data-tip="Edit" onClick={() => setEditing(true)}>
+          <i className="fa-solid fa-pencil" />
         </button>
         {editingStructure && (
-          <button type="button" className="tracker-slot-btn is-remove" onClick={onRemove} title="Remove">−</button>
+          <button type="button" className="tracker-icon-btn" data-tip="Remove" onClick={onRemove}>
+            <i className="fa-solid fa-trash" />
+          </button>
         )}
       </div>
     )
@@ -149,6 +179,7 @@ export default function TrackerDestinations({ card, languages, onChange }) {
         </div>
       </div>
 
+      <div className="tracker-dest-table-wrap">
       <div className="tracker-dest-table">
         <div className="tracker-dest-row tracker-dest-head" style={{ gridTemplateColumns: `120px repeat(${platforms.length}, minmax(140px, 1fr))` }}>
           <span />
@@ -180,12 +211,17 @@ export default function TrackerDestinations({ card, languages, onChange }) {
                       />
                     ))
                   )}
+                  {slots.filter((slot) => (slot.url || '').trim()).length > 1 && (
+                    <small className="tracker-dest-count">
+                      {slots.filter((slot) => (slot.url || '').trim()).length} links
+                    </small>
+                  )}
                   {editingStructure && (
                     <button
                       type="button"
                       className="tracker-slot-btn is-add"
                       onClick={() => addDest(language, platform)}
-                      title="Add link"
+                      data-tip="Add link"
                     >
                       +
                     </button>
@@ -195,6 +231,7 @@ export default function TrackerDestinations({ card, languages, onChange }) {
             })}
           </div>
         ))}
+      </div>
       </div>
     </section>
   )

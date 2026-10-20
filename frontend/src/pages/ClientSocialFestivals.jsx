@@ -5,6 +5,7 @@ import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useUI } from '../context/UIContext'
 import ConfirmModal from '../components/ConfirmModal'
+import CaptionCount, { captionTooLong } from '../components/CaptionCount'
 
 const PAGE_SIZE = 6
 
@@ -227,6 +228,10 @@ export default function ClientSocialFestivals() {
   }
 
   async function handleSaveCaption(postId) {
+    if (captionTooLong(editingCaptionText)) {
+      toast('Caption is over Instagram’s 2,200 character limit.', 'error')
+      return
+    }
     setSavingCaption(true)
     try {
       const result = await api.editSocialPostQueueCaption(token, clientId, postId, editingCaptionText)
@@ -263,6 +268,10 @@ export default function ClientSocialFestivals() {
     if (!postingPost) return
     if (publishTargets.length === 0) {
       toast('Please select at least one platform.', 'error')
+      return
+    }
+    if (captionTooLong(postCaption)) {
+      toast('Caption is over Instagram’s 2,200 character limit.', 'error')
       return
     }
     setPublishing(true)
@@ -390,11 +399,12 @@ export default function ClientSocialFestivals() {
               onChange={(e) => setEditingCaptionText(e.target.value)}
               style={{ width: '100%', resize: 'none', fontSize: '0.9rem', flex: 1 }}
             />
+            <CaptionCount value={editingCaptionText} />
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => handleSaveCaption(post.id)}
-                disabled={savingCaption}
+                disabled={savingCaption || captionTooLong(editingCaptionText)}
                 style={{ flex: 1 }}
               >
                 {savingCaption ? 'Saving...' : 'Save Caption'}
@@ -474,7 +484,7 @@ export default function ClientSocialFestivals() {
       <div className="card" style={{ marginBottom: '32px', padding: '24px' }}>
         <h3 style={{ marginBottom: '16px' }}>Automatic Festive Publisher</h3>
         <p style={{ color: '#64748b', marginBottom: '16px', fontSize: '0.9rem' }}>
-          When enabled, the system will automatically generate and publish posts for major holidays and festivals on the day of the event.
+          The night before a festival, a draft is generated. At 9:00 AM on the festival day, these switches post that auto draft. They do not publish festive posts you created manually.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: savingSchedule ? 'wait' : 'pointer' }}>
@@ -506,7 +516,7 @@ export default function ClientSocialFestivals() {
               style={{ display: 'none' }}
               disabled={savingSchedule}
             />
-            <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-instagram" style={{ color: '#E1306C', marginRight: '6px' }} /> Automatically publish to Instagram(For Auto-Generated Festive Posts Only)</span>
+            <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-instagram" style={{ color: '#E1306C', marginRight: '6px' }} /> Post the auto-generated festive draft to Instagram at 9:00 AM</span>
           </label>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: savingSchedule ? 'wait' : 'pointer' }}>
@@ -538,7 +548,7 @@ export default function ClientSocialFestivals() {
               style={{ display: 'none' }}
               disabled={savingSchedule}
             />
-            <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-facebook" style={{ color: '#1877F2', marginRight: '6px' }} /> Automatically publish to Facebook(For Auto-Generated Festive Posts Only)</span>
+            <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-facebook" style={{ color: '#1877F2', marginRight: '6px' }} /> Post the auto-generated festive draft to Facebook at 9:00 AM</span>
           </label>
         </div>
       </div>
@@ -679,6 +689,7 @@ export default function ClientSocialFestivals() {
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{targetAction === 'schedule' ? 'Schedule Post' : 'Post to Social Media'}</h3>
             <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
               <img src={assetUrl(postingPost.image_url)} alt="Preview" style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '8px' }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <textarea
                 className="form-input"
                 rows={4}
@@ -687,6 +698,8 @@ export default function ClientSocialFestivals() {
                 style={{ flex: 1, resize: 'none', fontSize: '0.9rem' }}
                 disabled={targetAction === 'schedule'}
               />
+              <CaptionCount value={postCaption} />
+              </div>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
@@ -727,7 +740,7 @@ export default function ClientSocialFestivals() {
               <button
                 className="btn btn-primary"
                 onClick={handleConfirmPublish}
-                disabled={publishing}
+                disabled={publishing || captionTooLong(postCaption)}
               >
                 {publishing ? 'Processing...' : (targetAction === 'schedule' ? 'Schedule Post' : 'Publish Now')}
               </button>

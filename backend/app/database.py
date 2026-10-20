@@ -1704,8 +1704,11 @@ def sync_tracker_scripts_for_item(client_id: str, item_id: str, script_text: str
             if str(card.get("content_plan_item_id") or "") != item_id:
                 continue
             assets = dict(card.get("assets") or {})
+            if assets.get("script_source") == "manual":
+                continue
             assets["script_text"] = script_text or ""
             assets["script_url"] = ""
+            assets["script_source"] = "plan"
             card["assets"] = assets
             changed = True
             updated += 1

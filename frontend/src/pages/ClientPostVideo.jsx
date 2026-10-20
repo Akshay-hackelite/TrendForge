@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
-import api, { apiFetch } from '../api'
+import api, { apiFetchProgress } from '../api'
+import PublishProgressBusy from '../components/PublishProgressBusy'
+import { usePublishProgressStages } from '../hooks/usePublishProgressStages'
+import { hinglishChannel, languageName, publishValidation, videoUploadBody } from '../publishVideo'
 import VideoUrlAttachField from '../components/VideoUrlAttachField'
 import { useAuth } from '../context/AuthContext'
 import { useUI } from '../context/UIContext'
@@ -67,7 +70,7 @@ export default function ClientPostVideo() {
 
   const [metadataBusy, setMetadataBusy] = useState(false)
   const [refinePrompt, setRefinePrompt] = useState('')
-  const [postingBusy, setPostingBusy] = useState(false)
+  const progress = usePublishProgressStages()
 
   const loadPlan = useCallback(async () => {
     if (!token || !clientId) return
@@ -144,6 +147,7 @@ export default function ClientPostVideo() {
 
   const activeLocales = useMemo(() => itemLocales(activeItem), [activeItem])
   const previewMeta = activeLocales.hinglish || Object.values(activeLocales).find((loc) => loc?.yt_title) || {}
+  const activeLangKeys = Object.keys(activeLocales).filter((key) => activeLocales[key]?.yt_title)
 
   const loadChannelVideos = useCallback(async () => {
     if (!token || !clientId || !modalChannelId) return
@@ -243,100 +247,59 @@ export default function ClientPostVideo() {
     [channels, selectedChannelIds],
   )
 
-  const firstSelectedUrl = useMemo(() => {
-    const first = selectedYtChannels[0]
-    return (first && videoUrlsByChannel[first.id]) || ''
-  }, [selectedYtChannels, videoUrlsByChannel])
-
   const handlePostVideo = async () => {
     setPageError('')
     if (!activeItem) {
       setPageError('Please select a keyword to preview.')
       return
     }
-    if (!postToYT && !postToIG && !postToFB) {
-      setPageError('Please select at least one platform to post to.')
-      return
-    }
-    if (postToYT && selectedChannelIds.length === 0) {
-      setPageError('You must select at least one YouTube channel to post to YouTube.')
-      return
-    }
-
     const locales = itemLocales(activeItem)
-    const meta = locales.hinglish || Object.values(locales).find((loc) => loc?.yt_title) || {}
-    if (postToYT && !meta.yt_title) {
-      setPageError('Generate YouTube metadata first.')
-      return
-    }
-    if (postToYT) {
-      for (const ch of selectedYtChannels) {
-        if (!(videoUrlsByChannel[ch.id] || '').trim()) {
-          setPageError(`Add a video URL for "${ch.title || ch.id}".`)
-          return
-        }
-      }
-    }
-
-    const socialUrl = (socialVideoLink || firstSelectedUrl || Object.values(videoUrlsByChannel).find(Boolean) || '').trim()
-    if ((postToIG || postToFB) && !postToYT && !socialUrl) {
-      setPageError('Please provide a social video URL.')
+    const problem = publishValidation({
+      surface: 'page',
+      postToYT,
+      postToIG,
+      postToFB,
+      selectedChannels: selectedYtChannels,
+      videoUrlsByChannel,
+      socialVideoLink,
+      locales,
+    })
+    if (problem) {
+      setPageError(problem)
       return
     }
 
-    setPostingBusy(true)
+    progress.start()
     try {
-      if (postToYT) {
-        const socialChannelId = selectedYtChannels[0]?.id
-        for (const ch of selectedYtChannels) {
-          const cleanTags = (meta.yt_tags || []).map((t) => t.replace(/#/g, ''))
-          const attachSocial = (postToIG || postToFB) && ch.id === socialChannelId
-          await apiFetch('/video.upload', {
-            token,
-            body: {
-              client_id: clientId,
-              channel_id: ch.id,
-              drive_link: (videoUrlsByChannel[ch.id] || '').trim(),
-              title: meta.yt_title || activeItem.topic,
-              description: meta.yt_description || '',
-              tags: cleanTags,
-              thumbnail_url: meta.yt_thumbnail_url,
-              post_to_instagram: attachSocial && postToIG,
-              post_to_facebook: attachSocial && postToFB,
-              topic_id: activeItem.topic_id || activeItem.id,
-              language: 'hinglish',
-              social_source_url: attachSocial ? (socialVideoLink || firstSelectedUrl || '').trim() || undefined : undefined,
-            },
-          })
-        }
+      const result = await apiFetchProgress('/video.upload', {
+        token,
+        body: videoUploadBody({
+          clientId,
+          topicId: activeItem.topic_id || activeItem.id,
+          postToYT,
+          postToIG,
+          postToFB,
+          selectedChannels: selectedYtChannels,
+          videoUrlsByChannel,
+          socialVideoLink,
+          locales,
+          fallbackChannelId: channels[0]?.id || '',
+        }),
+        onStage: progress.setStage,
+      })
+      if (result?.errors?.length) {
+        const message = result.errors.join(' ')
+        setPageError(message)
+        toast(message, 'error')
       } else {
-        const cleanTags = (meta.yt_tags || []).map((t) => t.replace(/#/g, ''))
-        await apiFetch('/video.upload', {
-          token,
-          body: {
-            client_id: clientId,
-            channel_id: channels[0]?.id || '',
-            drive_link: socialUrl,
-            title: meta.yt_title || activeItem.topic,
-            description: meta.yt_description || '',
-            tags: cleanTags,
-            thumbnail_url: meta.yt_thumbnail_url,
-            post_to_instagram: postToIG,
-            post_to_facebook: postToFB,
-            topic_id: activeItem.topic_id || activeItem.id,
-            language: 'hinglish',
-            social_source_url: socialUrl || undefined,
-          },
-        })
+        toast('Video posted successfully!', 'success')
+        setVideoUrlsByChannel({})
+        setSocialVideoLink('')
       }
-
-      toast('Video posted successfully!', 'success')
-      setVideoUrlsByChannel({})
-      setSocialVideoLink('')
     } catch (err) {
       setPageError(`Failed to post video: ${err.message}`)
     } finally {
-      setPostingBusy(false)
+      progress.stop()
     }
   }
 
@@ -567,6 +530,8 @@ export default function ClientPostVideo() {
                               <input type="checkbox" checked={isSel} onChange={() => {}} />
                               <span style={{ marginLeft: '12px', fontWeight: '500' }}>
                                 {c.title || c.id}
+                                {' — '}
+                                {String(c.language || '').trim() ? languageName(c.language) : 'No language in Settings'}
                               </span>
                             </div>
                           )
@@ -581,7 +546,7 @@ export default function ClientPostVideo() {
                         Video URL for each channel
                       </label>
                       <p className="text-muted" style={{ marginTop: 0, marginBottom: '12px', fontSize: '0.9em' }}>
-                        Each selected channel gets its own video URL. The same metadata is used for every channel.
+                        Each selected channel gets its own link, and metadata follows the language in Settings.
                       </p>
                       {selectedYtChannels.map((ch) => (
                         <div key={ch.id} className="channel-video-row">
@@ -614,7 +579,7 @@ export default function ClientPostVideo() {
                         token={token}
                         clientId={clientId}
                         toast={toast}
-                        placeholder={firstSelectedUrl ? 'Optional — uses the first channel URL if blank' : 'https://drive.google.com/...'}
+                        placeholder={(hinglishChannel(selectedYtChannels) && (videoUrlsByChannel[hinglishChannel(selectedYtChannels).id] || '').trim()) ? 'Optional — uses Hinglish channel URL if blank' : 'https://drive.google.com/...'}
                         value={socialVideoLink}
                         onChange={setSocialVideoLink}
                         inputStyle={{ width: '100%', padding: '14px 20px', fontSize: '1.05em', borderRadius: '12px', border: '1px solid var(--border-dark, #000)' }}
@@ -626,12 +591,10 @@ export default function ClientPostVideo() {
                     className="btn btn-primary btn-block"
                     style={{ padding: '14px', fontSize: '1.05em', fontWeight: '500', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}
                     onClick={handlePostVideo}
-                    disabled={postingBusy}
+                    disabled={progress.busy}
                   >
-                    {postingBusy ? (
-                      <>
-                        <i className="fa-solid fa-spinner fa-spin" /> Uploading and Posting...
-                      </>
+                    {progress.busy ? (
+                      <PublishProgressBusy stage={progress.stage} elapsed={progress.elapsed} />
                     ) : (
                       <>
                         <i className="fa-solid fa-paper-plane" /> Publish Video

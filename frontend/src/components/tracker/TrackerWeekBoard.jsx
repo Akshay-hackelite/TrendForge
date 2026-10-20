@@ -4,6 +4,7 @@ import {
   cardsSummary,
   displayLanguages,
   emptyCard,
+  maybeAdvanceStage,
   seedDestinations,
   serializableCard,
   startCard,
@@ -21,6 +22,8 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
   const [dragId, setDragId] = useState(null)
   const [dropTargetId, setDropTargetId] = useState(null)
   const [scriptedItems, setScriptedItems] = useState([])
+  const [planItems, setPlanItems] = useState([])
+  const [planKeywords, setPlanKeywords] = useState([])
   const [scriptBusyId, setScriptBusyId] = useState(null)
   const [channels, setChannels] = useState([])
   const saveTimer = useRef(null)
@@ -57,7 +60,10 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
     if (!token || !nextClientId) return
     try {
       const data = await api.getContentPlan(token, nextClientId)
-      setScriptedItems((data.suggestions?.items || []).filter((item) => (item.script || '').trim()))
+      const items = data.suggestions?.items || []
+      setPlanItems(items)
+      setPlanKeywords(data.suggestions?.keyword_analysis || [])
+      setScriptedItems(items.filter((item) => (item.script || '').trim()))
     } catch (err) {
       toast(err.message, 'error')
     }
@@ -239,7 +245,8 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
     if (!token || !clientId) return
     setScriptBusyId(card.id)
     try {
-      if (card.content_plan_item_id) {
+      const manual = card.assets?.script_source === 'manual'
+      if (!manual && card.content_plan_item_id) {
         await api.updateContentScript(token, clientId, {
           itemId: card.content_plan_item_id,
           script: text,
@@ -247,9 +254,10 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
         skipNextSave.current = true
         setCards((prev) => prev.map((row) => {
           if (row.content_plan_item_id !== card.content_plan_item_id) return row
+          if (row.assets?.script_source === 'manual' && row.id !== card.id) return row
           return {
             ...row,
-            assets: { ...(row.assets || {}), script_text: text, script_url: '' },
+            assets: { ...(row.assets || {}), script_text: text, script_url: '', script_source: 'plan' },
           }
         }))
         await loadScripts(clientId)
@@ -257,7 +265,12 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
       } else {
         patchCard({
           ...card,
-          assets: { ...(card.assets || {}), script_text: text, script_url: '' },
+          assets: {
+            ...(card.assets || {}),
+            script_text: text,
+            script_url: '',
+            script_source: manual ? 'manual' : (card.assets?.script_source || ''),
+          },
         })
         toast('Script saved on this card', 'success')
       }
@@ -266,6 +279,49 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
     } finally {
       setScriptBusyId(null)
     }
+  }
+
+  function handleSaveManualScript(card, payload) {
+    patchCard(maybeAdvanceStage({
+      ...card,
+      started: true,
+      collapsed: false,
+      title: payload.title || card.title || '',
+      topic_id: payload.topicId || null,
+      content_plan_item_id: payload.itemId || null,
+      assets: {
+        ...(card.assets || {}),
+        script_text: payload.text,
+        script_url: '',
+        script_source: 'manual',
+      },
+    }))
+    toast('Script saved on this card', 'success')
+  }
+
+  function titlesForCard(card) {
+    const matching = planItems.filter((item) => (
+      card.type === 'short' ? item.format === 'Short' : item.format !== 'Short'
+    ))
+    const rows = matching.map((item) => ({
+      key: item.id,
+      title: item.title_hinglish || item.working_title || item.title_en || item.topic_text || 'Untitled',
+      keyword: item.topic_text,
+      itemId: item.id,
+      topicId: item.topic_id,
+    }))
+    const covered = new Set(rows.map((row) => row.topicId).filter(Boolean))
+    for (const keyword of planKeywords) {
+      if (!keyword?.topic_id || covered.has(keyword.topic_id)) continue
+      rows.push({
+        key: `kw:${keyword.topic_id}`,
+        title: keyword.topic_text || 'Untitled',
+        keyword: keyword.topic_text || '',
+        itemId: null,
+        topicId: keyword.topic_id,
+      })
+    }
+    return rows
   }
 
   if (loading) {
@@ -284,9 +340,11 @@ export default function TrackerWeekBoard({ clientId, year, month, week, onSummar
             scriptedItems={scriptedItems.filter((item) => (
               card.type === 'short' ? item.format === 'Short' : item.format !== 'Short'
             ))}
+            titleOptions={titlesForCard(card)}
             scriptBusy={scriptBusyId === card.id}
             onPickScript={(item) => handlePickScript(card, item)}
             onSaveScriptText={(text) => handleSaveScriptText(card, text)}
+            onSaveManualScript={(payload) => handleSaveManualScript(card, payload)}
             onChange={patchCard}
             onStart={() => patchCard(startCard(card, displayLanguages(languages)))}
             onAddSameType={() => addCard(card.type, card.id)}

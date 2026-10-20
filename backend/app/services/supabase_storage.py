@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -10,8 +11,16 @@ import httpx
 from app.config import settings
 from app.services.storage import StorageLimitError
 
-# Free-tier hard cap. GCS is not limited by this module.
+# Free-tier hard cap for images and other small files. Instagram video copies
+# use the resumable path and may be as large as a reel (1 GB).
 MAX_FILE_BYTES = 50 * 1024 * 1024
+VIDEO_CHUNK_BYTES = 8 * 1024 * 1024
+VIDEO_UPLOAD_TIMEOUT = 3600.0
+LARGE_FILE_BYTES = 32 * 1024 * 1024
+INSTAGRAM_VIDEO_MAX_BYTES = 1000 * 1000 * 1000
+STORAGE_TIMEOUT_DETAIL = (
+    "Storage upload timed out after 1 hour. The video was not copied for Instagram."
+)
 
 
 def _blob_path(folder: str, filename: str) -> str:
@@ -85,14 +94,117 @@ def upload_bytes(folder: str, filename: str, data: bytes, content_type: str = "i
     return public_url(blob_path)
 
 
-def upload_file(folder: str, local_path: Path | str, content_type: str = "application/pdf") -> str:
+def explain_storage_failure(exc: BaseException) -> str:
+    text = str(exc)
+    if "timeout" in text.lower() or "timed out" in text.lower():
+        return STORAGE_TIMEOUT_DETAIL
+    return text
+
+
+def _is_video_copy(content_type: str, size: int, allow_large: bool) -> bool:
+    if allow_large or content_type.startswith("video/"):
+        return True
+    return size > LARGE_FILE_BYTES and size <= MAX_FILE_BYTES
+
+
+def _tus_metadata(blob_path: str, content_type: str) -> str:
+    _, bucket, _ = _require_config()
+
+    def field(name: str, value: str) -> str:
+        encoded = base64.b64encode(value.encode()).decode()
+        return f"{name} {encoded}"
+
+    return ",".join([
+        field("bucketName", bucket),
+        field("objectName", blob_path),
+        field("contentType", content_type),
+        field("cacheControl", "3600"),
+    ])
+
+
+def _upload_resumable(
+    path: Path,
+    blob_path: str,
+    content_type: str,
+    on_progress,
+) -> str:
+    """8 MB TUS chunks. The public object stays up so Instagram can fetch it."""
+    base, _, key = _require_config()
+    size = path.stat().st_size
+    endpoint = f"{base}/storage/v1/upload/resumable"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "apikey": key,
+        "x-upsert": "true",
+        "Tus-Resumable": "1.0.0",
+        "Upload-Length": str(size),
+        "Upload-Metadata": _tus_metadata(blob_path, content_type),
+    }
+    timeout = httpx.Timeout(VIDEO_UPLOAD_TIMEOUT, connect=30.0)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            created = client.post(endpoint, headers=headers)
+            _raise_for_status(created, "resumable upload")
+            location = created.headers.get("Location") or ""
+            if location.startswith("/"):
+                location = f"{base}{location}"
+            if not location:
+                raise ValueError("Supabase resumable upload did not return a Location.")
+            sent = 0
+            with path.open("rb") as handle:
+                while sent < size:
+                    blob = handle.read(VIDEO_CHUNK_BYTES)
+                    if not blob:
+                        break
+                    patched = client.patch(
+                        location,
+                        headers={
+                            "Authorization": f"Bearer {key}",
+                            "apikey": key,
+                            "Tus-Resumable": "1.0.0",
+                            "Upload-Offset": str(sent),
+                            "Content-Type": "application/offset+octet-stream",
+                        },
+                        content=blob,
+                    )
+                    _raise_for_status(patched, "resumable upload")
+                    sent += len(blob)
+                    if on_progress and size:
+                        on_progress(min(100, int(sent * 100 / size)))
+    except httpx.TimeoutException as exc:
+        raise TimeoutError(STORAGE_TIMEOUT_DETAIL) from exc
+    except Exception as exc:
+        if isinstance(exc, TimeoutError):
+            raise
+        message = explain_storage_failure(exc)
+        if message == STORAGE_TIMEOUT_DETAIL:
+            raise TimeoutError(STORAGE_TIMEOUT_DETAIL) from exc
+        raise
+    return public_url(blob_path)
+
+
+def upload_file(
+    folder: str,
+    local_path: Path | str,
+    content_type: str = "application/pdf",
+    *,
+    on_progress=None,
+    allow_large: bool = False,
+) -> str:
     path = Path(local_path)
-    _raise_if_too_large(path.stat().st_size)
+    size = path.stat().st_size
+    if _is_video_copy(content_type, size, allow_large):
+        if size > INSTAGRAM_VIDEO_MAX_BYTES:
+            raise StorageLimitError("File is over 1 GB.")
+        return _upload_resumable(path, _blob_path(folder, path.name), content_type, on_progress)
+    _raise_if_too_large(size)
     blob_path = _blob_path(folder, path.name)
     with httpx.Client(timeout=120.0) as client:
         with path.open("rb") as handle:
             response = client.post(_object_api_url(blob_path), headers=_headers(content_type), content=handle.read())
     _raise_for_status(response, "upload")
+    if on_progress:
+        on_progress(100)
     return public_url(blob_path)
 
 

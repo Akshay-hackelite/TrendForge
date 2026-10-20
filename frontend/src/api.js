@@ -34,6 +34,51 @@ export async function apiFetch(path, { token, body, form, formData } = {}) {
   return response.json()
 }
 
+/** Newline-delimited JSON. Calls onStage for each server stage, then returns the done result. */
+export async function apiFetchProgress(path, { token, body, onStage } = {}) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(url(path), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+  if (!response.body) {
+    return response.json()
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result = null
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let newline = buffer.indexOf('\n')
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim()
+      buffer = buffer.slice(newline + 1)
+      newline = buffer.indexOf('\n')
+      if (!line) continue
+      const event = JSON.parse(line)
+      if (event.event === 'stage') onStage?.(event.stage)
+      if (event.event === 'error') throw new Error(event.detail || 'Publish failed')
+      if (event.event === 'done') result = event.result
+    }
+  }
+  const tail = buffer.trim()
+  if (tail) {
+    const event = JSON.parse(tail)
+    if (event.event === 'stage') onStage?.(event.stage)
+    if (event.event === 'error') throw new Error(event.detail || 'Publish failed')
+    if (event.event === 'done') result = event.result
+  }
+  return result
+}
+
 function isMp3Buffer(buffer) {
   if (!buffer || buffer.byteLength < 2) return false
   const head = new Uint8Array(buffer, 0, Math.min(3, buffer.byteLength))
@@ -387,15 +432,19 @@ export const api = {
         script,
       },
     }),
-  generateYouTubeMetadata: (token, clientId, { itemIds, userPrompt, referenceVideoIds, languages } = {}) =>
+  generateYouTubeMetadata: (token, clientId, { itemIds, userPrompt, referenceVideoIds, languages, scriptOverride, topicId, topicTitle, format } = {}) =>
     apiFetch('/client.content-plan-generate-metadata', {
       token,
       body: {
         client_id: clientId,
-        item_ids: itemIds,
+        item_ids: itemIds || [],
         user_prompt: userPrompt,
         reference_video_ids: referenceVideoIds || [],
         languages: languages || ['hinglish'],
+        ...(scriptOverride ? { script_override: scriptOverride } : {}),
+        ...(topicId ? { topic_id: topicId } : {}),
+        ...(topicTitle ? { topic_title: topicTitle } : {}),
+        ...(format ? { format } : {}),
       },
     }),
   uploadLocalVideo: (token, clientId, file) => {
@@ -404,15 +453,30 @@ export const api = {
     formData.append('file', file)
     return apiFetch('/video.local.upload', { token, formData })
   },
-  refineYouTubeMetadata: (token, clientId, { itemId, userPrompt, referenceVideoIds, language } = {}) =>
+  refineYouTubeMetadata: (token, clientId, { itemId, userPrompt, referenceVideoIds, language, topicId, topicTitle, format } = {}) =>
     apiFetch('/client.content-plan-refine-metadata', {
       token,
       body: {
         client_id: clientId,
-        item_id: itemId,
+        item_id: itemId || undefined,
         user_prompt: userPrompt,
         reference_video_ids: referenceVideoIds || [],
         language: language || 'hinglish',
+        ...(topicId ? { topic_id: topicId } : {}),
+        ...(topicTitle ? { topic_title: topicTitle } : {}),
+        ...(format ? { format } : {}),
+      },
+    }),
+  updateYouTubeDescription: (token, clientId, { topicId, language, title, description, tags } = {}) =>
+    apiFetch('/client.content-video.update-description', {
+      token,
+      body: {
+        client_id: clientId,
+        topic_id: topicId,
+        language: language || 'hinglish',
+        yt_title: title || '',
+        yt_description: description || '',
+        yt_tags: tags || [],
       },
     }),
   narrateContentScript: (

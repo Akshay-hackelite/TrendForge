@@ -366,18 +366,34 @@ class ClientContentPlanNarrateScriptRequest(BaseModel):
 
 class ClientContentPlanGenerateMetadataRequest(BaseModel):
     client_id: str
-    item_ids: List[str]
+    item_ids: List[str] = []
     reference_video_ids: List[str] = []
     user_prompt: Optional[str] = None
     languages: List[str] = Field(default_factory=lambda: ["hinglish"])
+    script_override: Optional[str] = None
+    topic_id: Optional[str] = None
+    topic_title: Optional[str] = None
+    format: Optional[str] = None
 
 
 class ClientContentPlanRefineMetadataRequest(BaseModel):
     client_id: str
-    item_id: str
+    item_id: Optional[str] = None
     user_prompt: str
     reference_video_ids: List[str] = []
     language: Optional[str] = None
+    topic_id: Optional[str] = None
+    topic_title: Optional[str] = None
+    format: Optional[str] = None
+
+
+class ContentVideoUpdateDescriptionRequest(BaseModel):
+    client_id: str
+    topic_id: str
+    language: str
+    yt_title: str = ""
+    yt_description: str = ""
+    yt_tags: List[str] = []
 
 
 class ClientContentPlanResponse(BaseModel):
@@ -385,6 +401,7 @@ class ClientContentPlanResponse(BaseModel):
     active_client_id: Optional[str] = None
     active_channel_id: Optional[str] = None
     suggestions: ContentSuggestionsPayload
+    yt_locales: Optional[dict] = None
 
 
 # Social Media Schemas
@@ -922,6 +939,7 @@ class WeeklyTrackerAssets(BaseModel):
     script_text: str = ""
     audio_url: str = ""
     video_url: str = ""
+    script_source: str = ""
 
 
 class WeeklyTrackerCard(BaseModel):
@@ -1183,16 +1201,31 @@ class ContentVideo(BaseModel):
     updated_at: Optional[str] = None
 
 
+class VideoUploadChannel(BaseModel):
+    channel_id: str
+    drive_link: str = ""
+    title: str = ""
+    description: str = ""
+    tags: List[str] = []
+    thumbnail_url: Optional[str] = None
+    language: Optional[str] = None
+    topic_id: Optional[str] = None
+
+
 class VideoUploadRequest(BaseModel):
     client_id: str
-    channel_id: str
-    drive_link: str
-    title: str
-    description: str
-    tags: List[str]
+    channel_id: str = ""
+    drive_link: str = ""
+    title: str = ""
+    description: str = ""
+    tags: List[str] = []
     thumbnail_url: Optional[str] = None
     post_to_instagram: bool = False
     post_to_facebook: bool = False
+    post_to_youtube: bool = True
     topic_id: Optional[str] = None
     language: Optional[str] = None
     social_source_url: Optional[str] = None
+    social_video_url: Optional[str] = None
+    stream_progress: bool = False
+    channels: List[VideoUploadChannel] = []

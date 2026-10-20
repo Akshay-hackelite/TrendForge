@@ -97,7 +97,7 @@ export function emptyCard(type, sortOrder, isDefault = false) {
     sort_order: sortOrder,
     stage: 'planned',
     is_default: isDefault,
-    assets: { script_url: '', script_text: '', audio_url: '', video_url: '' },
+    assets: { script_url: '', script_text: '', audio_url: '', video_url: '', script_source: '' },
     destinations: [],
     structure: {
       platforms: [...(DEFAULT_PLATFORMS[type] || [])],

@@ -1,29 +1,29 @@
 import { useMemo, useState } from 'react'
-import { apiFetch } from '../../api'
+import { apiFetchProgress } from '../../api'
+import PublishProgressBusy from '../PublishProgressBusy'
 import VideoUrlAttachField from '../VideoUrlAttachField'
+import { usePublishProgressStages } from '../../hooks/usePublishProgressStages'
+import { hinglishChannel, languageName, publishValidation, videoUploadBody } from '../../publishVideo'
 import { localeHasTitle, maybeAdvanceStage } from './trackerUtils'
 
 export default function TrackerPublishVideo({ card, weekContext, onChange }) {
   const { token, clientId, toast, channels = [] } = weekContext
   const locales = card.yt_locales || {}
   const hasMeta = localeHasTitle(locales)
-  const meta = locales.hinglish || Object.values(locales).find((loc) => loc?.yt_title) || {}
   const [postToYT, setPostToYT] = useState(true)
   const [postToIG, setPostToIG] = useState(false)
   const [postToFB, setPostToFB] = useState(false)
   const [selectedChannelIds, setSelectedChannelIds] = useState(channels[0] ? [channels[0].id] : [])
   const [videoUrlsByChannel, setVideoUrlsByChannel] = useState({})
   const [socialVideoLink, setSocialVideoLink] = useState('')
-  const [busy, setBusy] = useState(false)
+  const progress = usePublishProgressStages()
 
   const selectedYtChannels = useMemo(
-    () => channels.filter((c) => selectedChannelIds.includes(c.id)),
+    () => channels.filter((channel) => selectedChannelIds.includes(channel.id)),
     [channels, selectedChannelIds],
   )
-  const firstSelectedUrl = useMemo(() => {
-    const first = selectedYtChannels[0]
-    return (first && videoUrlsByChannel[first.id]) || ''
-  }, [selectedYtChannels, videoUrlsByChannel])
+  const hinglish = hinglishChannel(selectedYtChannels)
+  const hinglishUrl = hinglish ? (videoUrlsByChannel[hinglish.id] || '').trim() : ''
 
   async function handlePublish() {
     if (!card.topic_id) {
@@ -34,84 +34,58 @@ export default function TrackerPublishVideo({ card, weekContext, onChange }) {
       toast('Generate YouTube metadata first.', 'error')
       return
     }
-    if (!postToYT && !postToIG && !postToFB) {
-      toast('Select at least one platform.', 'error')
-      return
-    }
-    if (postToYT && selectedChannelIds.length === 0) {
-      toast('Select at least one YouTube channel.', 'error')
-      return
-    }
-    if (postToYT) {
-      for (const ch of selectedYtChannels) {
-        if (!(videoUrlsByChannel[ch.id] || '').trim()) {
-          toast(`Add a video URL for "${ch.title || ch.id}".`, 'error')
-          return
-        }
-      }
-    }
-    const socialUrl = (socialVideoLink || firstSelectedUrl || Object.values(videoUrlsByChannel).find(Boolean) || '').trim()
-    if ((postToIG || postToFB) && !postToYT && !socialUrl) {
-      toast('Please provide a social video URL.', 'error')
+    const problem = publishValidation({
+      surface: 'tracker',
+      postToYT,
+      postToIG,
+      postToFB,
+      selectedChannels: selectedYtChannels,
+      videoUrlsByChannel,
+      socialVideoLink,
+      locales,
+    })
+    if (problem) {
+      toast(problem, 'error')
       return
     }
 
-    setBusy(true)
+    progress.start()
     try {
-      if (postToYT) {
-        const socialChannelId = selectedYtChannels[0]?.id
-        for (const ch of selectedYtChannels) {
-          const cleanTags = (meta.yt_tags || []).map((t) => String(t).replace(/#/g, ''))
-          const attachSocial = (postToIG || postToFB) && ch.id === socialChannelId
-          await apiFetch('/video.upload', {
-            token,
-            body: {
-              client_id: clientId,
-              channel_id: ch.id,
-              drive_link: (videoUrlsByChannel[ch.id] || '').trim(),
-              title: meta.yt_title || card.title,
-              description: meta.yt_description || '',
-              tags: cleanTags,
-              thumbnail_url: meta.yt_thumbnail_url,
-              post_to_instagram: attachSocial && postToIG,
-              post_to_facebook: attachSocial && postToFB,
-              topic_id: card.topic_id,
-              language: 'hinglish',
-              social_source_url: attachSocial ? (socialVideoLink || firstSelectedUrl || '').trim() || undefined : undefined,
-            },
-          })
-        }
+      const result = await apiFetchProgress('/video.upload', {
+        token,
+        body: videoUploadBody({
+          clientId,
+          topicId: card.topic_id,
+          postToYT,
+          postToIG,
+          postToFB,
+          selectedChannels: selectedYtChannels,
+          videoUrlsByChannel,
+          socialVideoLink,
+          locales,
+          fallbackChannelId: channels[0]?.id || '',
+        }),
+        onStage: progress.setStage,
+      })
+      if (result?.errors?.length) {
+        toast(result.errors.join(' '), 'error')
       } else {
-        const cleanTags = (meta.yt_tags || []).map((t) => String(t).replace(/#/g, ''))
-        await apiFetch('/video.upload', {
-          token,
-          body: {
-            client_id: clientId,
-            channel_id: channels[0]?.id || '',
-            drive_link: socialUrl,
-            title: meta.yt_title || card.title,
-            description: meta.yt_description || '',
-            tags: cleanTags,
-            thumbnail_url: meta.yt_thumbnail_url,
-            post_to_instagram: postToIG,
-            post_to_facebook: postToFB,
-            topic_id: card.topic_id,
-            language: 'hinglish',
-            social_source_url: socialUrl || undefined,
-          },
-        })
+        toast('Video posted.', 'success')
+        setVideoUrlsByChannel({})
+        setSocialVideoLink('')
       }
-      const result = await weekContext.reloadWeek?.()
-      if (!result) {
-        onChange(maybeAdvanceStage({ ...card, stage: 'posted' }))
-      }
-      toast('Video posted.', 'success')
-      setVideoUrlsByChannel({})
-      setSocialVideoLink('')
     } catch (err) {
       toast(err.message, 'error')
     } finally {
-      setBusy(false)
+      progress.stop()
+    }
+    try {
+      const reloaded = await weekContext.reloadWeek?.()
+      if (!reloaded) {
+        onChange(maybeAdvanceStage({ ...card, stage: 'posted' }))
+      }
+    } catch (err) {
+      toast(`Tracker could not refresh (${err.message}). Log in again, then reopen this week.`, 'error')
     }
   }
 
@@ -144,19 +118,21 @@ export default function TrackerPublishVideo({ card, weekContext, onChange }) {
             <div className="tracker-channel-pick">
               <strong>Select YouTube Channels ({selectedChannelIds.length})</strong>
               <div className="tracker-channel-list">
-                {channels.map((ch) => {
-                  const isSel = selectedChannelIds.includes(ch.id)
+                {channels.map((channel) => {
+                  const isSel = selectedChannelIds.includes(channel.id)
+                  const language = String(channel.language || '').trim()
                   return (
                     <button
                       type="button"
-                      key={ch.id}
+                      key={channel.id}
                       className={`tracker-channel-row${isSel ? ' is-on' : ''}`}
                       onClick={() => setSelectedChannelIds((prev) => (
-                        prev.includes(ch.id) ? prev.filter((id) => id !== ch.id) : [...prev, ch.id]
+                        prev.includes(channel.id) ? prev.filter((id) => id !== channel.id) : [...prev, channel.id]
                       ))}
                     >
                       <input type="checkbox" checked={isSel} readOnly />
-                      <span>{ch.title || ch.id}</span>
+                      <span>{channel.title || channel.id}</span>
+                      <small>{language ? languageName(language) : 'No language in Settings'}</small>
                     </button>
                   )
                 })}
@@ -167,16 +143,16 @@ export default function TrackerPublishVideo({ card, weekContext, onChange }) {
           {postToYT && selectedYtChannels.length > 0 && (
             <div className="tracker-drive-list">
               <strong>Video URL for each channel</strong>
-              <p className="tracker-hint">Each selected channel gets its own video URL. The same metadata is used for every channel.</p>
-              {selectedYtChannels.map((ch) => (
-                <div key={ch.id} className="tracker-drive-row">
-                  <span>{ch.title || ch.id}</span>
+              <p className="tracker-hint">Each selected channel gets its own link, and metadata follows the language in Settings.</p>
+              {selectedYtChannels.map((channel) => (
+                <div key={channel.id} className="tracker-drive-row">
+                  <span>{channel.title || channel.id}</span>
                   <VideoUrlAttachField
                     token={token}
                     clientId={clientId}
                     toast={toast}
-                    value={videoUrlsByChannel[ch.id] || ''}
-                    onChange={(url) => setVideoUrlsByChannel((prev) => ({ ...prev, [ch.id]: url }))}
+                    value={videoUrlsByChannel[channel.id] || ''}
+                    onChange={(url) => setVideoUrlsByChannel((prev) => ({ ...prev, [channel.id]: url }))}
                   />
                 </div>
               ))}
@@ -190,15 +166,17 @@ export default function TrackerPublishVideo({ card, weekContext, onChange }) {
                 token={token}
                 clientId={clientId}
                 toast={toast}
-                placeholder={firstSelectedUrl ? 'Optional — uses the first channel URL if blank' : 'https://drive.google.com/...'}
+                placeholder={hinglishUrl ? 'Optional — uses Hinglish channel URL if blank' : 'https://drive.google.com/...'}
                 value={socialVideoLink}
                 onChange={setSocialVideoLink}
               />
             </div>
           )}
 
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={handlePublish}>
-            {busy ? 'Uploading…' : (
+          <button type="button" className="btn btn-primary" disabled={progress.busy} onClick={handlePublish}>
+            {progress.busy ? (
+              <PublishProgressBusy stage={progress.stage} elapsed={progress.elapsed} />
+            ) : (
               <>
                 <i className="fa-solid fa-paper-plane" /> Publish Video
               </>

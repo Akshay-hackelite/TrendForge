@@ -87,7 +87,7 @@ VIDEO_DEFAULT_SLOTS = {
 
 
 def _empty_assets() -> dict:
-    return {"script_url": "", "script_text": "", "audio_url": "", "video_url": ""}
+    return {"script_url": "", "script_text": "", "audio_url": "", "video_url": "", "script_source": ""}
 
 
 def default_card(card_type: str, sort_order: int, *, is_default: bool = False) -> dict:
@@ -208,50 +208,50 @@ def _locale_has_title(locales) -> bool:
     )
 
 
-def _fill_empty_dest(card: dict, platform: str, url: str, language: str | None = None) -> None:
+def _place_posted_url(card: dict, platform: str, url: str, language: str | None = None) -> None:
+    """Skip an exact URL already on the card. Else fill an empty cell, or append another slot."""
+    url = str(url or "").strip()
     if not url:
         return
     dests = list(card.get("destinations") or [])
-    match = next(
-        (
-            dest
-            for dest in dests
-            if dest.get("platform") == platform
-            and (not language or dest.get("language") == language)
-            and not str(dest.get("url") or "").strip()
-        ),
-        None,
-    )
+    if any(str(dest.get("url") or "").strip() == url for dest in dests):
+        card["destinations"] = dests
+        return
+
+    def is_empty(dest: dict) -> bool:
+        if dest.get("platform") != platform:
+            return False
+        if language:
+            if dest.get("language") != language:
+                return False
+        elif dest.get("language"):
+            return False
+        return not str(dest.get("url") or "").strip()
+
+    match = next((dest for dest in dests if is_empty(dest)), None)
     if match:
         match["url"] = url
+        card["destinations"] = dests
         return
-    if language:
-        match = next(
-            (
-                dest
-                for dest in dests
-                if dest.get("platform") == platform
-                and dest.get("language") == language
-                and not str(dest.get("url") or "").strip()
-            ),
-            None,
-        )
-        if match:
-            match["url"] = url
-            return
-    card.setdefault("destinations", dests)
+    dests.append({
+        "id": f"dest-{uuid.uuid4().hex[:8]}",
+        "platform": platform,
+        "language": language,
+        "url": url,
+    })
+    card["destinations"] = dests
 
 
 def _merge_posted_urls(card: dict, package: dict) -> None:
     for row in package.get("youtube_urls") or []:
         if isinstance(row, dict):
-            _fill_empty_dest(card, "youtube", str(row.get("url") or "").strip(), row.get("language"))
+            _place_posted_url(card, "youtube", str(row.get("url") or "").strip(), row.get("language"))
     for row in package.get("instagram_urls") or []:
         if isinstance(row, dict):
-            _fill_empty_dest(card, "instagram", str(row.get("url") or "").strip(), row.get("language"))
+            _place_posted_url(card, "instagram", str(row.get("url") or "").strip(), row.get("language"))
     for row in package.get("facebook_urls") or []:
         if isinstance(row, dict):
-            _fill_empty_dest(card, "facebook", str(row.get("url") or "").strip(), row.get("language"))
+            _place_posted_url(card, "facebook", str(row.get("url") or "").strip(), row.get("language"))
 
 
 def _hydrate_cards(client_id: str, cards: list[dict]) -> list[dict]:
@@ -344,6 +344,7 @@ def _fill_card_from_plan_item(card: dict, item: dict, languages: list[str]) -> d
     assets = dict(card.get("assets") or _empty_assets())
     assets["script_text"] = str(item.get("script") or "")
     assets["script_url"] = ""
+    assets["script_source"] = "plan"
     card["assets"] = assets
     card["content_plan_item_id"] = item.get("id")
     card["topic_id"] = item.get("topic_id")
@@ -495,7 +496,12 @@ def weekly_tracker_attach_script(
                 status_code=400,
                 detail=f"This script is a {item.get('format') or 'Long'} video. Pick a matching tracker card.",
             )
-        already_here = str(card.get("content_plan_item_id") or "") == body.item_id and not _script_slot_empty(card)
+        assets = card.get("assets") or {}
+        already_here = (
+            str(card.get("content_plan_item_id") or "") == body.item_id
+            and not _script_slot_empty(card)
+            and assets.get("script_source") != "manual"
+        )
         if already_here:
             return {**_response(doc, languages), "status": "already", "card_id": card.get("id")}
         _fill_card_from_plan_item(card, item, languages)

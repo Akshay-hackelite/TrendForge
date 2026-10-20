@@ -5,6 +5,7 @@ import { useUI } from '../context/UIContext'
 import api from '../api'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ConfirmModal from '../components/ConfirmModal'
+import CaptionCount, { captionTooLong } from '../components/CaptionCount'
 
 function assetUrl(path) {
   if (!path) return ''
@@ -28,6 +29,7 @@ export default function ClientSocialSchedule() {
   const [autoFallback, setAutoFallback] = useState(false)
   const [facebookAutoPublish, setFacebookAutoPublish] = useState(false)
   const [festiveAutoPublish, setFestiveAutoPublish] = useState(false)
+  const [festiveFacebookAutoPublish, setFestiveFacebookAutoPublish] = useState(false)
 
   const [queuedPosts, setQueuedPosts] = useState([])
   const [festivePosts, setFestivePosts] = useState([])
@@ -65,6 +67,7 @@ export default function ClientSocialSchedule() {
       setAutoFallback(!!scheduleRes.auto_fallback)
       setPostsPerDay(scheduleRes.posts_per_day || 1)
       setFestiveAutoPublish(!!scheduleRes.festive_auto_publish)
+      setFestiveFacebookAutoPublish(!!scheduleRes.festive_facebook_auto_publish)
       setFacebookAutoPublish(!!scheduleRes.facebook_auto_publish)
       setOriginalConfig({
         frequency: scheduleRes.frequency || 'off',
@@ -72,6 +75,7 @@ export default function ClientSocialSchedule() {
         autoFallback: !!scheduleRes.auto_fallback,
         postsPerDay: scheduleRes.posts_per_day || 1,
         festiveAutoPublish: !!scheduleRes.festive_auto_publish,
+        festiveFacebookAutoPublish: !!scheduleRes.festive_facebook_auto_publish,
         facebookAutoPublish: !!scheduleRes.facebook_auto_publish
       })
       setQueuedPosts(queueRes.posts || [])
@@ -90,8 +94,8 @@ export default function ClientSocialSchedule() {
   const handleSaveSchedule = async () => {
     setSaving(true)
     try {
-      await api.saveSocialSchedule(token, clientId, frequency, selectedDays, autoFallback, postsPerDay, festiveAutoPublish, facebookAutoPublish)
-      setOriginalConfig({ frequency, selectedDays, autoFallback, postsPerDay, festiveAutoPublish, facebookAutoPublish })
+      await api.saveSocialSchedule(token, clientId, frequency, selectedDays, autoFallback, postsPerDay, festiveAutoPublish, facebookAutoPublish, festiveFacebookAutoPublish)
+      setOriginalConfig({ frequency, selectedDays, autoFallback, postsPerDay, festiveAutoPublish, facebookAutoPublish, festiveFacebookAutoPublish })
       setIsEditing(false)
       toast('Schedule saved successfully.', 'success')
     } catch (err) {
@@ -108,6 +112,7 @@ export default function ClientSocialSchedule() {
       setAutoFallback(originalConfig.autoFallback)
       setPostsPerDay(originalConfig.postsPerDay || 1)
       setFestiveAutoPublish(originalConfig.festiveAutoPublish)
+      setFestiveFacebookAutoPublish(!!originalConfig.festiveFacebookAutoPublish)
       setFacebookAutoPublish(originalConfig.facebookAutoPublish || false)
     }
     setIsEditing(false)
@@ -183,6 +188,7 @@ export default function ClientSocialSchedule() {
 
   const handleSaveCaption = async (postId) => {
     if (!editingCaption.trim()) return toast('Caption cannot be empty', 'error')
+    if (captionTooLong(editingCaption)) return toast('Caption is over Instagram’s 2,200 character limit.', 'error')
     setSavingCaption(true)
     try {
       const result = await api.editSocialPostQueueCaption(token, clientId, postId, editingCaption)
@@ -346,7 +352,7 @@ export default function ClientSocialSchedule() {
 
         <div className="form-group" style={{ marginBottom: '32px', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid #e2e8f0' }}>
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontWeight: '500', color: '#334155' }}>
-            Automatic Publisher
+            Backup publisher (queue empty)
             <div 
               onMouseEnter={() => setShowTooltip(true)}
               onMouseLeave={() => setShowTooltip(false)}
@@ -388,7 +394,7 @@ export default function ClientSocialSchedule() {
                   zIndex: 10,
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 }}>
-                  When enabled, if your scheduled post queue runs empty, the system will automatically find your newest, un-published generated draft and publish it at the scheduled time to ensure you never miss a post.
+                  Frequency posts the queue at 9:00 AM. These backups run only if the queue is empty.
                   <div style={{
                     position: 'absolute',
                     bottom: '-4px',
@@ -404,6 +410,9 @@ export default function ClientSocialSchedule() {
               )}
             </div>
           </label>
+          <p style={{ color: '#64748b', margin: '0 0 12px', fontSize: '0.9rem' }}>
+            Frequency posts the queue at 9:00 AM. These backups run only if the queue is empty.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: isEditing ? 'pointer' : 'not-allowed', opacity: isEditing ? 1 : 0.6 }}>
               <div style={{
@@ -432,8 +441,9 @@ export default function ClientSocialSchedule() {
                 checked={autoFallback} 
                 onChange={(e) => setAutoFallback(e.target.checked)} 
                 style={{ display: 'none' }}
+                disabled={!isEditing}
               />
-              <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-instagram" style={{ color: '#E1306C', marginRight: '6px' }} /> Automatically publish newest drafts to Instagram if queue is empty</span>
+              <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-instagram" style={{ color: '#E1306C', marginRight: '6px' }} /> If the queue is empty, post the newest draft to Instagram</span>
             </label>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: isEditing ? 'pointer' : 'not-allowed', opacity: isEditing ? 1 : 0.6 }}>
@@ -463,8 +473,9 @@ export default function ClientSocialSchedule() {
                 checked={facebookAutoPublish} 
                 onChange={(e) => setFacebookAutoPublish(e.target.checked)} 
                 style={{ display: 'none' }}
+                disabled={!isEditing}
               />
-              <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-facebook" style={{ color: '#1877F2', marginRight: '6px' }} /> Automatically publish newest drafts to Facebook if queue is empty</span>
+              <span style={{ color: '#334155', fontWeight: '500' }}><i className="fa-brands fa-facebook" style={{ color: '#1877F2', marginRight: '6px' }} /> If the queue is empty, post the newest draft to Facebook</span>
             </label>
           </div>
         </div>
@@ -599,8 +610,9 @@ export default function ClientSocialSchedule() {
                         onChange={(e) => setEditingCaption(e.target.value)}
                         style={{ width: '100%', resize: 'none', fontSize: '0.85rem', flex: 1 }}
                       />
+                      <CaptionCount value={editingCaption} />
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-primary btn-xs" onClick={() => handleSaveCaption(post.id)} disabled={savingCaption}>
+                        <button className="btn btn-primary btn-xs" onClick={() => handleSaveCaption(post.id)} disabled={savingCaption || captionTooLong(editingCaption)}>
                           {savingCaption ? 'Saving...' : 'Save'}
                         </button>
                         <button className="btn btn-secondary btn-xs" onClick={() => setEditingPostId(null)} disabled={savingCaption}>

@@ -18,6 +18,7 @@ Respond ONLY with a valid JSON object containing the updated fields:
 }
 
 CRITICAL RULES:
+- Title max 100 characters. Description must stay under 5000 characters. Tags must be YouTube-legal: no # prefix, no commas inside a tag, no < or >. The combined length of all tags, including the commas between them, must stay under 500 characters.
 - Keep the result in the same language described by LANGUAGE INSTRUCTIONS unless the user explicitly asks to change language.
 - ONLY change the fields that the user's instructions pertain to.
 - If the user's instructions are ONLY about modifying the image (thumbnail), leave the `yt_title`, `yt_description`, and `yt_tags` exactly as they were provided.

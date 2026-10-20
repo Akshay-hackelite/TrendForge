@@ -170,6 +170,55 @@ def generate_youtube_metadata(
         result["yt_title"] = locked_title
     return result
 
+def _composition_line(portrait: bool) -> str:
+    if portrait:
+        return (
+            "Vertical 9:16 composition. Stack the layout from top to bottom. "
+            "Do not keep a 16:9 side-by-side layout."
+        )
+    return "Widescreen 16:9 composition."
+
+
+def _layout_rule(portrait: bool) -> str:
+    return _composition_line(portrait)
+
+
+def _layout_keep_line(portrait: bool) -> str:
+    if portrait:
+        return "Do not keep a 16:9 side-by-side layout. Stack subjects from top to bottom."
+    return "Keep a widescreen 16:9 layout."
+
+
+def _safe_zone_rule(portrait: bool) -> str:
+    if portrait:
+        return (
+            "Keep all text and important art in the middle 70% of the width and the middle 50% of the height. "
+            "The top 25% and the bottom 25% stay empty for platform chrome."
+        )
+    return (
+        "Keep all text and important art in the middle 80% vertically. "
+        "The top 10% and the bottom 10% stay empty."
+    )
+
+
+def _sub_banner(text: str | None) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    sentence = raw.split(".")[0].strip()
+    if len(sentence) > 90:
+        return sentence[:90].rstrip()
+    return sentence
+
+
+def _forbid_reference_wording() -> str:
+    return (
+        "Remove every other word from the reference. Remove the reference headline, bullets, "
+        "symptom chips, and video-specific sentences. No bullets, chips, or callouts. "
+        "Do not invent replacement text for them."
+    )
+
+
 def generate_youtube_thumbnail_prompt(
     client_summary: dict,
     topic: dict,
@@ -177,6 +226,9 @@ def generate_youtube_thumbnail_prompt(
     user_prompt: Optional[str] = None,
     reference_image_urls: List[str] = None,
     language: str = "hinglish",
+    headline: str = "",
+    sub_banner: str = "",
+    portrait: bool = False,
 ) -> str:
     """Generate a detailed DALL-E 3 image prompt using GPT-4o."""
     if not settings.OPENAI_API_KEY:
@@ -189,6 +241,8 @@ def generate_youtube_thumbnail_prompt(
     system_prompt = _fill_prompt(
         "youtube_thumbnail_generate.txt",
         language_text_rule=THUMBNAIL_TEXT_RULES[language],
+        aspect_line=_composition_line(portrait),
+        safe_zone=_safe_zone_rule(portrait),
     )
     
     text_content = (
@@ -196,6 +250,8 @@ def generate_youtube_thumbnail_prompt(
         f"Name: {client_summary.get('name', 'N/A')}\n"
         f"Specialty: {client_summary.get('specialty', 'N/A')}\n\n"
         f"Topic:\n{topic.get('topic_text', '')}\n\n"
+        f"Headline: {headline}\n"
+        f"Sub-banner: {sub_banner}\n\n"
     )
     if script:
         text_content += f"Script:\n{script}\n\n"
@@ -257,17 +313,19 @@ def generate_social_caption(
         {"role": "user", "content": text_content}
     ]
     
+    from app.services.youtube_api import fit_social_caption
+
     openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    
+
     try:
         response = openai_client.chat.completions.create(
             model=settings.OPENAI_MODEL,  # Use same model as scripts
             messages=messages,
         )
-        return response.choices[0].message.content.strip()
+        return fit_social_caption(response.choices[0].message.content.strip())
     except Exception as e:
         print(f"Failed to generate social caption: {e}")
-        return f"{yt_title}\n\n{yt_description[:1000]}"
+        return fit_social_caption(f"{yt_title}\n\n{yt_description[:1000]}")
 
 def refine_youtube_metadata(
     current_metadata: dict,
@@ -345,7 +403,175 @@ def refine_youtube_thumbnail_prompt(
         print(f"Failed to refine YouTube thumbnail prompt: {str(e)}")
         return current_thumbnail_prompt
 
-def generate_youtube_thumbnail(prompt: str) -> str:
+def _topic_label(topic: dict | None) -> str:
+    topic = topic or {}
+    return (
+        str(topic.get("topic_text") or "").strip()
+        or str(topic.get("title_hinglish") or "").strip()
+        or str(topic.get("working_title") or "").strip()
+        or str(topic.get("title_en") or "").strip()
+    )
+
+
+def reference_thumbnail_prompt(
+    *,
+    client_summary: dict,
+    topic: dict | None,
+    script: str | None = None,
+    user_prompt: str | None = None,
+    headline: str = "",
+    sub_banner: str = "",
+    language: str = "hinglish",
+    portrait: bool = False,
+) -> str:
+    """Fill the edit prompt file. Do not hardcode the image instructions here."""
+    aspect = "vertical 9:16 Shorts thumbnail" if portrait else "widescreen 16:9 YouTube thumbnail"
+    text = _fill_prompt(
+        "youtube_thumbnail_reference_edit.txt",
+        aspect=aspect,
+        layout_keep=_layout_keep_line(portrait),
+        forbid=_forbid_reference_wording(),
+        headline=(headline or "").strip(),
+        sub_banner=(sub_banner or "").strip(),
+        composition=_composition_line(portrait),
+        safe_zone=_safe_zone_rule(portrait),
+    )
+    parts = [text.strip(), "Client profile:", f"Name: {(client_summary or {}).get('name') or ''}", f"Specialty: {(client_summary or {}).get('specialty') or ''}"]
+    topic_label = _topic_label(topic)
+    if topic_label:
+        parts.append(f"Topic: {topic_label}")
+    if language:
+        parts.append(f"Language: {language}")
+    script_text = (script or "").strip()
+    if script_text:
+        parts.extend(["Video context:", script_text[:1200]])
+    if (user_prompt or "").strip():
+        parts.extend([
+            "User instructions that are about the image only. Ignore title, description, and tag requests.",
+            user_prompt.strip(),
+        ])
+    return "\n\n".join(part for part in parts if part)
+
+
+def _reference_image_candidates(reference: dict) -> list[str]:
+    video_id = str((reference or {}).get("id") or "").strip()
+    urls: list[str] = []
+    if video_id:
+        urls.extend([
+            f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+            f"https://i.ytimg.com/vi/{video_id}/sddefault.jpg",
+            f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        ])
+    thumb = str((reference or {}).get("thumbnail_url") or "").strip()
+    if thumb and thumb not in urls:
+        urls.append(thumb)
+    return urls
+
+
+def _download_reference_files(references: list[dict]) -> list[tuple]:
+    files: list[tuple] = []
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        for index, reference in enumerate((references or [])[:3]):
+            for url in _reference_image_candidates(reference):
+                try:
+                    response = client.get(url)
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    continue
+                content_type = (response.headers.get("content-type") or "image/jpeg").split(";")[0]
+                if not content_type.startswith("image/") or len(response.content) < 1000:
+                    continue
+                ext = ".png" if "png" in content_type else ".jpg"
+                files.append(("image[]", (f"ref-{index}{ext}", response.content, content_type)))
+                break
+    return files
+
+
+def _crop_widescreen(image_bytes: bytes) -> bytes:
+    return _crop_aspect(image_bytes, 16, 9)
+
+
+def _crop_portrait(image_bytes: bytes) -> bytes:
+    return _crop_aspect(image_bytes, 9, 16)
+
+
+def _crop_aspect(image_bytes: bytes, width_ratio: int, height_ratio: int) -> bytes:
+    import io
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    width, height = image.size
+    target = width_ratio / height_ratio
+    current = (width / height) if height else target
+    if abs(current - target) > 0.02:
+        if current > target:
+            new_width = int(height * target)
+            left = max(0, (width - new_width) // 2)
+            image = image.crop((left, 0, left + new_width, height))
+        else:
+            new_height = int(width / target)
+            top = max(0, (height - new_height) // 2)
+            image = image.crop((0, top, width, top + new_height))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _store_thumbnail_bytes(image_bytes: bytes) -> str:
+    filename = f"{uuid.uuid4()}.png"
+    try:
+        return upload_bytes("thumbnails", filename, image_bytes)
+    except Exception as exc:
+        print(f"Cloud storage upload failed: {exc}. Falling back to local disk.", flush=True)
+        SOCIAL_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+        (SOCIAL_ASSETS_DIR / filename).write_bytes(image_bytes)
+        return f"/social.asset/{filename}"
+
+
+def generate_reference_thumbnail(prompt: str, references: list[dict], *, portrait: bool = False) -> str | None:
+    """Edit reference thumbnails. Return None so the caller can use the text-only path."""
+    if not settings.OPENAI_API_KEY or not references:
+        return None
+    files = _download_reference_files(references)
+    if not files:
+        return None
+    size = "1024x1536" if portrait else "1536x1024"
+    try:
+        with httpx.Client(timeout=180) as client:
+            response = client.post(
+                "https://api.openai.com/v1/images/edits",
+                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                data={
+                    "model": settings.THUMBNAIL_MODEL,
+                    "prompt": prompt,
+                    "size": size,
+                    "quality": "medium",
+                    "n": "1",
+                    "output_format": "png",
+                },
+                files=files,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        row = (payload.get("data") or [{}])[0]
+        if row.get("b64_json"):
+            import base64
+            image_bytes = base64.b64decode(row["b64_json"])
+        elif row.get("url"):
+            with httpx.Client(timeout=60, follow_redirects=True) as client:
+                downloaded = client.get(row["url"])
+                downloaded.raise_for_status()
+                image_bytes = downloaded.content
+        else:
+            return None
+        cropped = _crop_portrait(image_bytes) if portrait else _crop_widescreen(image_bytes)
+        return _store_thumbnail_bytes(cropped)
+    except Exception as exc:
+        print(f"Reference thumbnail edit failed, falling back to text-only: {exc}", flush=True)
+        return None
+
+
+def generate_youtube_thumbnail(prompt: str, *, portrait: bool = False) -> str:
     """Generate a 16:9 YouTube thumbnail and save it locally."""
     if not settings.OPENAI_API_KEY:
         raise HTTPException(
@@ -359,13 +585,12 @@ def generate_youtube_thumbnail(prompt: str) -> str:
         response = openai_client.images.generate(
             model=settings.THUMBNAIL_MODEL,
             prompt=prompt,
-            size="1792x1024",
+            size="1024x1536" if portrait else "1792x1024",
             n=1,
         )
         
         image_data = response.data[0]
-        filename = f"{uuid.uuid4()}.png"
-        
+
         # gpt-image-2 returns b64_json, older models return url
         if getattr(image_data, 'b64_json', None):
             import base64
@@ -376,16 +601,9 @@ def generate_youtube_thumbnail(prompt: str) -> str:
             image_bytes = resp.read()
         else:
             raise ValueError("OpenAI did not return image data.")
-            
-        try:
-            public_url = upload_bytes("thumbnails", filename, image_bytes)
-            return public_url
-        except Exception as e:
-            print(f"Cloud storage upload failed: {e}. Falling back to local disk.")
-            SOCIAL_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-            path = SOCIAL_ASSETS_DIR / filename
-            path.write_bytes(image_bytes)
-            return f"/social.asset/{filename}"
+
+        image_bytes = _crop_portrait(image_bytes) if portrait else _crop_widescreen(image_bytes)
+        return _store_thumbnail_bytes(image_bytes)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

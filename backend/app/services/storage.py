@@ -32,16 +32,35 @@ def upload_bytes(folder: str, filename: str, data: bytes, content_type: str = "i
     raise ValueError(f"Unknown STORAGE_BACKEND={backend!r} (use supabase or gcs)")
 
 
-def upload_file(folder: str, local_path: Path | str, content_type: str = "application/pdf") -> str:
+def upload_file(
+    folder: str,
+    local_path: Path | str,
+    content_type: str = "application/pdf",
+    *,
+    on_progress=None,
+    allow_large: bool = False,
+) -> str:
     backend = _backend()
     if backend == "gcs":
         from app.services import gcs_storage
 
-        return gcs_storage.upload_file(folder, local_path, content_type)
+        return gcs_storage.upload_file(
+            folder,
+            local_path,
+            content_type,
+            on_progress=on_progress,
+            allow_large=allow_large,
+        )
     if backend == "supabase":
         from app.services import supabase_storage
 
-        return supabase_storage.upload_file(folder, local_path, content_type)
+        return supabase_storage.upload_file(
+            folder,
+            local_path,
+            content_type,
+            on_progress=on_progress,
+            allow_large=allow_large,
+        )
     raise ValueError(f"Unknown STORAGE_BACKEND={backend!r} (use supabase or gcs)")
 
 

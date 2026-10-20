@@ -4446,6 +4446,78 @@ a.plan-item-link {
     background: var(--border-light);
 }
 
+.tracker-icon-btn[data-tip] {
+    position: relative;
+}
+.tracker-icon-btn[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.08s linear 0.12s;
+    z-index: 20;
+}
+.tracker-icon-btn[data-tip]:hover::after {
+    opacity: 1;
+}
+
+.tracker-meta-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.tracker-meta-field > span {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.tracker-meta-field small.is-over,
+.char-count.is-over {
+    color: #dc2626;
+    font-weight: 700;
+}
+.char-count {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-muted, #64748b);
+    font-size: 0.8rem;
+}
+.tracker-script-switch {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--bg-light, #f1f5f9);
+    border: 1px solid var(--border);
+}
+.tracker-script-switch button {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.tracker-script-switch button.is-on {
+    background: var(--primary);
+    color: #fff;
+}
+.tracker-title-results {
+    max-height: 280px;
+    overflow: auto;
+}
+
 .tracker-timeline {
     position: relative;
     padding: 6px 0 4px;
@@ -5136,10 +5208,36 @@ a.plan-item-link {
     margin-bottom: 12px;
 }
 
+.tracker-dest-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
 .tracker-dest-table {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 640px;
+    padding: 10px;
+}
+
+.publish-progress-busy {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    line-height: 1.3;
+}
+
+.publish-progress-busy small {
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.tracker-dest-count {
+    color: var(--text-muted, #64748b);
+    font-size: 0.75rem;
 }
 
 .tracker-dest-row {

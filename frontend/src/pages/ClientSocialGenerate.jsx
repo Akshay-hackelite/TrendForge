@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ConfirmModal from '../components/ConfirmModal'
+import CaptionCount, { captionTooLong } from '../components/CaptionCount'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useUI } from '../context/UIContext'
@@ -399,6 +400,10 @@ export default function ClientSocialGenerate() {
       toast('Please select at least one platform.', 'error')
       return
     }
+    if (captionTooLong(postCaption)) {
+      toast('Caption is over Instagram’s 2,200 character limit.', 'error')
+      return
+    }
     setPublishing(true)
     try {
       if (targetAction === 'publish') {
@@ -454,6 +459,10 @@ export default function ClientSocialGenerate() {
   async function handleEditCaptionSave(post) {
     if (!editingCaptionText.trim()) {
       toast('Caption cannot be empty', 'error')
+      return
+    }
+    if (captionTooLong(editingCaptionText)) {
+      toast('Caption is over Instagram’s 2,200 character limit.', 'error')
       return
     }
     setSavingCaption(true)
@@ -1066,12 +1075,13 @@ export default function ClientSocialGenerate() {
                                 boxShadow: 'none'
                               }}
                             />
+                            <CaptionCount value={editingCaptionText} />
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
                                 type="button"
                                 className="btn btn-primary btn-sm"
                                 onClick={() => handleEditCaptionSave(post)}
-                                disabled={savingCaption}
+                                disabled={savingCaption || captionTooLong(editingCaptionText)}
                                 style={{ flex: 1 }}
                               >
                                 {savingCaption ? 'Saving...' : 'Save Caption'}
@@ -1251,6 +1261,7 @@ export default function ClientSocialGenerate() {
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{targetAction === 'schedule' ? 'Schedule Post' : 'Post to Social Media'}</h3>
             <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
               <img src={assetUrl(postingPost.image_url)} alt="Preview" style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '8px' }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <textarea
                 className="form-input"
                 rows={4}
@@ -1259,6 +1270,8 @@ export default function ClientSocialGenerate() {
                 style={{ flex: 1, resize: 'none', fontSize: '0.9rem' }}
                 disabled={targetAction === 'schedule'}
               />
+              <CaptionCount value={postCaption} />
+              </div>
             </div>
             
             <div style={{ marginBottom: '20px' }}>
@@ -1299,7 +1312,7 @@ export default function ClientSocialGenerate() {
               <button 
                 className="btn btn-primary" 
                 onClick={handleConfirmPublish}
-                disabled={publishing}
+                disabled={publishing || captionTooLong(postCaption)}
               >
                 {publishing ? 'Processing...' : (targetAction === 'schedule' ? 'Schedule Post' : 'Publish Now')}
               </button>

@@ -36,12 +36,23 @@ from app.database import (
 )
 from app.google_oauth import get_user_google_creds
 from app.services.topics import generate_auto_topics, normalize_topics
-from app.services.youtube_api import fetch_all_channels
+from app.services.youtube_api import (
+    YT_DESCRIPTION_MAX,
+    YT_TAG_MAX,
+    YT_TAGS_TOTAL_MAX,
+    YT_TITLE_MAX,
+    clamp_text,
+    fetch_all_channels,
+    sanitize_youtube_tags,
+)
 from app.services.youtube_metadata import (
+    generate_reference_thumbnail,
     generate_youtube_metadata,
     generate_youtube_thumbnail,
     generate_youtube_thumbnail_prompt,
     normalize_yt_language,
+    reference_thumbnail_prompt,
+    _sub_banner,
     refine_youtube_metadata,
     refine_youtube_thumbnail_prompt,
 )
@@ -673,10 +684,10 @@ def _locale_payload(metadata_res: dict, thumbnail_prompt: str, thumbnail_url: st
     locale = {}
     if metadata_res.get("yt_title"):
         locale["yt_title"] = metadata_res["yt_title"]
-    if metadata_res.get("yt_description"):
-        locale["yt_description"] = metadata_res["yt_description"]
+    if metadata_res.get("yt_description") is not None:
+        locale["yt_description"] = clamp_text(metadata_res.get("yt_description"), YT_DESCRIPTION_MAX)
     if metadata_res.get("yt_tags"):
-        locale["yt_tags"] = metadata_res["yt_tags"]
+        locale["yt_tags"] = sanitize_youtube_tags(metadata_res["yt_tags"])
     if thumbnail_prompt:
         locale["yt_thumbnail_prompt"] = thumbnail_prompt
     if thumbnail_url:
@@ -702,6 +713,30 @@ def _apply_locale_metadata(target: dict, language: str, locale: dict) -> None:
     locales[language] = {**previous, **locale}
     target["yt_locales"] = locales
     _mirror_legacy_yt_fields(target)
+
+
+def _video_matches_shape(video: dict, portrait: bool) -> bool:
+    if not isinstance(video, dict) or "is_short" not in video or video.get("is_short") is None:
+        return True
+    return bool(video.get("is_short")) is portrait
+
+
+def _reference_rows(videos, *, reference_video_ids, portrait: bool, auto_newest: bool) -> list[dict]:
+    ordered = sorted(videos or [], key=lambda video: video.get("published_at", ""), reverse=True)
+    if reference_video_ids:
+        wanted = set(reference_video_ids)
+        pool = [video for video in ordered if video.get("id") in wanted]
+    elif auto_newest:
+        pool = [video for video in ordered if _video_matches_shape(video, portrait)]
+    else:
+        pool = []
+    rows = []
+    for video in pool:
+        if video.get("id") or video.get("thumbnail_url"):
+            rows.append({"id": video.get("id"), "thumbnail_url": video.get("thumbnail_url")})
+        if len(rows) >= 3:
+            break
+    return rows
 
 
 @router.post("/client.content-plan-generate-metadata", response_model=schemas.ClientContentPlanResponse)
@@ -746,18 +781,17 @@ def client_content_plan_generate_metadata(
     suggestions = client_bundle.get("content_suggestions", {})
     items = suggestions.get("items", [])
     
-    # Get reference image URLs
-    reference_image_urls = []
-    if channel_id:
-        videos = list_videos_for_channel(channel_id, client_id)
-        videos = sorted(videos, key=lambda v: v.get("published_at", ""), reverse=True)
-        if body.reference_video_ids:
-            selected = [v for v in videos if v.get("id") in body.reference_video_ids]
-            reference_image_urls = [v.get("thumbnail_url") for v in selected]
-            reference_image_urls = [u for u in reference_image_urls if u][:3]
-        else:
-            reference_image_urls = [v.get("thumbnail_url") for v in videos]
-            reference_image_urls = [u for u in reference_image_urls if u][:3]
+    portrait = str(body.format or "").strip().lower() in {"short", "shorts"}
+    # Picked videos, else the newest 3 of the same shape (long vs short).
+    reference_rows = _reference_rows(
+        list_videos_for_channel(channel_id, client_id) if channel_id else [],
+        reference_video_ids=body.reference_video_ids,
+        portrait=portrait,
+        auto_newest=True,
+    )
+    reference_image_urls = [row["thumbnail_url"] for row in reference_rows if row.get("thumbnail_url")]
+    script_override = (body.script_override or "").strip()
+    use_script_override = bool(script_override) and len(body.item_ids or []) == 1
         
     # Build a lookup from topic_id -> content plan item (for script reuse)
     topic_id_to_item = {}
@@ -790,6 +824,10 @@ def client_content_plan_generate_metadata(
             or str(topic.get("title_en") or "").strip()
         )
 
+    def _sub_banner(text: str | None) -> str:
+        sentence = str(text or "").strip().split(".")[0].strip()
+        return sentence[:90].rstrip()
+
     def _generate_locale(topic, script, language):
         metadata_res = generate_youtube_metadata(
             client_summary=client_summary,
@@ -799,24 +837,74 @@ def client_content_plan_generate_metadata(
             language=language,
             script_title=_script_title_for(topic) if script else None,
         )
-        thumbnail_prompt = generate_youtube_thumbnail_prompt(
-            client_summary=client_summary,
-            topic=topic,
-            script=script,
-            user_prompt=body.user_prompt,
-            reference_image_urls=reference_image_urls,
-            language=language,
-        )
+        headline = str(metadata_res.get("yt_title") or "")
+        banner = _sub_banner(metadata_res.get("yt_description"))
+        thumbnail_prompt = ""
         thumbnail_url = None
-        if thumbnail_prompt:
-            try:
-                thumbnail_url = generate_youtube_thumbnail(thumbnail_prompt)
-            except Exception as e:
-                print(f"Failed to generate thumbnail for language={language}: {e}")
+        if reference_rows:
+            thumbnail_prompt = reference_thumbnail_prompt(
+                client_summary=client_summary,
+                topic=topic,
+                script=script,
+                user_prompt=body.user_prompt,
+                headline=headline,
+                sub_banner=banner,
+                language=language,
+                portrait=portrait,
+            )
+            thumbnail_url = generate_reference_thumbnail(
+                thumbnail_prompt, reference_rows, portrait=portrait
+            )
+        if not thumbnail_url:
+            thumbnail_prompt = generate_youtube_thumbnail_prompt(
+                client_summary=client_summary,
+                topic=topic,
+                script=script,
+                user_prompt=body.user_prompt,
+                reference_image_urls=reference_image_urls,
+                language=language,
+                headline=headline,
+                sub_banner=banner,
+                portrait=portrait,
+            )
+            if thumbnail_prompt:
+                try:
+                    thumbnail_url = generate_youtube_thumbnail(thumbnail_prompt, portrait=portrait)
+                except Exception as e:
+                    print(f"Failed to generate thumbnail for language={language}: {e}")
         return _locale_payload(metadata_res, thumbnail_prompt, thumbnail_url)
 
     # Track which topic_ids we've already processed to avoid duplicate generation
     processed_topic_ids = set()
+
+    if not body.item_ids and (body.topic_id or "").strip():
+        topic_id = body.topic_id.strip()
+        topic = {
+            "topic_text": (body.topic_title or "").strip(),
+            "title_hinglish": (body.topic_title or "").strip(),
+        }
+        saved_locales = {}
+        for language in languages:
+            try:
+                locale = _generate_locale(topic, script_override, language)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[yt-metadata] failed language={language} topic={topic_id}: {exc}", flush=True)
+                continue
+            saved_locales[language] = locale
+            _persist_locale(
+                topic_id,
+                locale,
+                language,
+                topic_text=topic["topic_text"],
+                source="manual",
+                item_id=None,
+            )
+        response = client_content_plan_get(
+            schemas.ClientContentPlanGetRequest(client_id=client_id),
+            current_user=current_user,
+        )
+        response.yt_locales = saved_locales
+        return response
 
     # --- Pass 1: Content Plan items (From Script) ---
     for item in items:
@@ -827,7 +915,11 @@ def client_content_plan_generate_metadata(
             topic_text = item.get("topic") or item.get("topic_text") or item.get("working_title") or ""
             for language in languages:
                 try:
-                    locale = _generate_locale(item, item.get("script"), language)
+                    locale = _generate_locale(
+                        item,
+                        script_override if use_script_override else item.get("script"),
+                        language,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     print(
                         f"[yt-metadata] failed language={language} item={item.get('id')}: {exc}",
@@ -856,7 +948,9 @@ def client_content_plan_generate_metadata(
             continue
 
         matching_item = topic_id_to_item.get(kw.get("topic_id"))
-        script_to_use = matching_item.get("script") if matching_item else None
+        script_to_use = script_override if use_script_override else (
+            matching_item.get("script") if matching_item else None
+        )
         topic_for_prompt = matching_item if matching_item else {"topic_text": kw.get("topic_text")}
         source = "script" if script_to_use else "manual"
         item_id = matching_item.get("id") if matching_item else None
@@ -914,12 +1008,22 @@ def client_content_plan_refine_metadata(
         # Search keyword_analysis by topic_id
         target_kw = next((k for k in keyword_analysis if isinstance(k, dict) and str(k.get("topic_id")) == str(body.item_id)), None)
     
-    if not target_item and not target_kw:
+    if not target_item and not target_kw and (body.topic_id or "").strip():
+        topic_id = body.topic_id.strip()
+        package = fetch_content_video(client_id, topic_id)
+        target = {
+            "topic_id": topic_id,
+            "topic_text": (body.topic_title or (package or {}).get("topic_text") or "").strip(),
+            "yt_locales": (package or {}).get("yt_locales") or {},
+        }
+        target_item = None
+        target_kw = None
+    elif not target_item and not target_kw:
         raise HTTPException(status_code=404, detail="Topic item not found")
-    
-    target = target_item or target_kw
+    else:
+        target = target_item or target_kw
+        topic_id = target.get("topic_id")
     language = normalize_yt_language(body.language or "hinglish")
-    topic_id = target.get("topic_id")
     matching_item = target_item or next((i for i in items if i.get("topic_id") == topic_id), None)
     matching_kw = target_kw or next((k for k in keyword_analysis if isinstance(k, dict) and k.get("topic_id") == topic_id), None)
     source = "script" if matching_item and matching_item.get("script") else "manual"
@@ -927,17 +1031,19 @@ def client_content_plan_refine_metadata(
         (matching_item.get("topic") if matching_item else None)
         or (matching_item.get("topic_text") if matching_item else None)
         or (matching_kw.get("topic_text") if matching_kw else None)
+        or target.get("topic_text")
         or ""
     )
     package = fetch_content_video(client_id, topic_id) if topic_id else None
         
-    # Get reference image URLs
-    reference_image_urls = []
-    if channel_id and body.reference_video_ids:
-        videos = list_videos_for_channel(channel_id, client_id)
-        selected = [v for v in videos if v.get("id") in body.reference_video_ids]
-        reference_image_urls = [v.get("thumbnail_url") for v in selected]
-        reference_image_urls = [u for u in reference_image_urls if u][:3]
+    portrait = str(body.format or "").strip().lower() in {"short", "shorts"}
+    # Refine uses references only when the caller sent ids. Do not auto-attach.
+    reference_rows = _reference_rows(
+        list_videos_for_channel(channel_id, client_id) if channel_id else [],
+        reference_video_ids=body.reference_video_ids,
+        portrait=portrait,
+        auto_newest=False,
+    )
 
     locales = dict((package or {}).get("yt_locales") or target.get("yt_locales") or {})
     current_locale = locales.get(language) if isinstance(locales.get(language), dict) else {}
@@ -970,12 +1076,31 @@ def client_content_plan_refine_metadata(
     )
     
     locale = _locale_payload(metadata_res, thumbnail_prompt, None)
-    if thumbnail_prompt and thumbnail_prompt != current_thumbnail_prompt:
+    if reference_rows:
+        banner = _sub_banner(locale.get("yt_description"))
+        edit_prompt = reference_thumbnail_prompt(
+            client_summary={
+                "name": client_bundle.get("name", "N/A"),
+                "specialty": client_bundle.get("specialty", "N/A"),
+            },
+            topic=target if isinstance(target, dict) else {},
+            script=None,
+            user_prompt=body.user_prompt,
+            headline=str(locale.get("yt_title") or ""),
+            sub_banner=banner,
+            language=language,
+            portrait=portrait,
+        )
+        edited = generate_reference_thumbnail(edit_prompt, reference_rows, portrait=portrait)
+        if edited:
+            locale["yt_thumbnail_prompt"] = edit_prompt
+            locale["yt_thumbnail_url"] = edited
+    if not locale.get("yt_thumbnail_url") and thumbnail_prompt and thumbnail_prompt != current_thumbnail_prompt:
         try:
-            locale["yt_thumbnail_url"] = generate_youtube_thumbnail(thumbnail_prompt)
+            locale["yt_thumbnail_url"] = generate_youtube_thumbnail(thumbnail_prompt, portrait=portrait)
         except Exception as e:
             print(f"Failed to generate thumbnail during refine: {e}")
-    elif current_locale.get("yt_thumbnail_url"):
+    elif not locale.get("yt_thumbnail_url") and current_locale.get("yt_thumbnail_url"):
         locale["yt_thumbnail_url"] = current_locale.get("yt_thumbnail_url")
 
     if topic_id:
@@ -991,7 +1116,64 @@ def client_content_plan_refine_metadata(
             
     client_bundle["content_suggestions"] = suggestions
     replace_content_plan(client_id, client_bundle)
-    return client_content_plan_get(schemas.ClientContentPlanGetRequest(client_id=client_id), current_user=current_user)
+    response = client_content_plan_get(
+        schemas.ClientContentPlanGetRequest(client_id=client_id),
+        current_user=current_user,
+    )
+    if topic_id and not target_item:
+        response.yt_locales = {language: locale}
+    return response
+
+
+@router.post("/client.content-video.update-description")
+def client_content_video_update_description(
+    body: schemas.ContentVideoUpdateDescriptionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    username = current_user["username"]
+    client_id = body.client_id
+    _require_client_bundle(username, client_id, with_videos=False)
+    language = normalize_yt_language(body.language)
+    package = fetch_content_video(client_id, body.topic_id)
+    if not package:
+        raise HTTPException(status_code=404, detail="Content video not found")
+    locales = package.get("yt_locales") or {}
+    current = locales.get(language) if isinstance(locales.get(language), dict) else {}
+    if not (current or {}).get("yt_title"):
+        raise HTTPException(status_code=400, detail="Generate metadata for this language first.")
+    title = str(body.yt_title or "").strip()
+    description = str(body.yt_description or "")
+    tags = [str(tag).strip() for tag in (body.yt_tags or []) if str(tag).strip()]
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+    if len(title) > YT_TITLE_MAX:
+        raise HTTPException(status_code=400, detail="Title must be 100 characters or fewer.")
+    if len(description) > YT_DESCRIPTION_MAX:
+        raise HTTPException(status_code=400, detail="Description must be 5000 characters or fewer.")
+    if len(",".join(tags)) > YT_TAGS_TOTAL_MAX:
+        raise HTTPException(status_code=400, detail="Tags must be 500 characters or fewer once joined.")
+    for tag in tags:
+        if len(tag) > YT_TAG_MAX or any(char in tag for char in "#<>"):
+            raise HTTPException(
+                status_code=400,
+                detail="Each tag must be 100 characters or fewer and cannot contain #, <, or >.",
+            )
+    merged = {**current, "yt_title": title, "yt_description": description, "yt_tags": tags}
+    upsert_content_video(
+        client_id,
+        body.topic_id,
+        topic_text=package.get("topic_text") or "",
+        source=package.get("source") or "manual",
+        content_plan_item_id=package.get("content_plan_item_id"),
+        locales={language: merged},
+        replace_locales=True,
+    )
+    saved = fetch_content_video(client_id, body.topic_id) or {}
+    return {
+        "topic_id": body.topic_id,
+        "language": language,
+        "yt_locales": saved.get("yt_locales") or {},
+    }
 
 
 @router.post("/client.select", response_model=schemas.ClientListResponse)

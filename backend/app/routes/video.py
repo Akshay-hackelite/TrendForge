@@ -7,8 +7,6 @@ from app import schemas
 from app.auth import get_current_user
 from app.config import settings
 from app.database import (
-    append_content_video_posted_url,
-    append_content_video_source_url,
     fetch_channel,
     fetch_client_doc,
     fetch_user,
@@ -16,6 +14,7 @@ from app.database import (
     replace_channel_videos,
     update_video_fields,
 )
+from app.services.video_publish import execute_video_upload
 from app.google_oauth import get_user_google_creds
 from app.services.storage import StorageLimitError, upload_bytes
 from app.services.youtube_api import fetch_channel_analytics, sync_videos_from_youtube
@@ -370,183 +369,10 @@ async def video_local_upload(
     }
 
 
-@router.post("/video.upload", response_model=dict)
+@router.post("/video.upload")
 def video_upload(
     body: schemas.VideoUploadRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    import gdown
-    import os
-    import uuid
-    import requests
-    from app.services.youtube_api import upload_video_to_youtube
-
-    username = current_user["username"]
-    client_id, channel_id = _resolve_ids(username, body.client_id, body.channel_id)
-    creds = get_user_google_creds(username, client_id, channel_id)
-
-    # 1. Download video
-    video_path = f"/tmp/{uuid.uuid4()}.mp4"
-    try:
-        if "drive.google.com" in body.drive_link:
-            # Handle Google Drive links
-            gdown.download(body.drive_link, video_path, quiet=False)
-        else:
-            # Handle standard public video URLs (e.g. S3, direct MP4 link)
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            with requests.get(body.drive_link, stream=True, headers=headers) as r:
-                r.raise_for_status()
-                with open(video_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192): 
-                        f.write(chunk)
-                        
-        if not os.path.exists(video_path):
-            raise ValueError("Failed to download video.")
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to download video: {str(e)}"
-        )
-
-    # 2. Handle thumbnail
-    thumbnail_path = None
-    if body.thumbnail_url:
-        if body.thumbnail_url.startswith("/social.asset/"):
-            from pathlib import Path
-            SOCIAL_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "social_assets"
-            relative_path = body.thumbnail_url.replace("/social.asset/", "", 1)
-            local_file = SOCIAL_ASSETS_DIR / relative_path
-            if local_file.exists():
-                thumbnail_path = str(local_file)
-            else:
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Thumbnail not found locally: {body.thumbnail_url}"
-                )
-        else:
-            thumbnail_path = f"/tmp/{uuid.uuid4()}.jpg"
-            try:
-                resp = requests.get(body.thumbnail_url)
-                resp.raise_for_status()
-                with open(thumbnail_path, "wb") as f:
-                    f.write(resp.content)
-            except Exception as e:
-                # Clean up video before raising
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to download thumbnail: {str(e)}"
-                )
-
-    # 3. Upload to YouTube
-    video_id = None
-    try:
-        video_id = upload_video_to_youtube(
-            creds=creds,
-            channel_id=channel_id,
-            video_path=video_path,
-            title=body.title,
-            description=body.description,
-            tags=body.tags,
-            thumbnail_path=thumbnail_path
-        )
-        
-        # 4. Social Integration
-        ig_post_id = None
-        fb_post_id = None
-        if body.post_to_instagram or body.post_to_facebook:
-            from app.services.storage import upload_file
-            from app.services.youtube_metadata import generate_social_caption
-            from app.routes.social import get_instagram_connection, get_facebook_connection
-            
-            # Upload video to cloud storage for a public URL
-            gcs_url = upload_file("social_post_videos", video_path, content_type="video/mp4")
-            
-            # Generate AI Caption
-            social_caption = generate_social_caption(body.title, body.description, body.tags)
-            
-            if body.post_to_instagram:
-                try:
-                    conn = get_instagram_connection(body.client_id)
-                    ig_user_id = conn["instagram_user_id"]
-                    access_token = conn["access_token"]
-                    
-                    media_resp = requests.post(
-                        f"https://graph.instagram.com/{ig_user_id}/media",
-                        data={
-                            "media_type": "REELS",
-                            "video_url": gcs_url,
-                            "caption": social_caption,
-                            "access_token": access_token,
-                        },
-                    )
-                    media_resp.raise_for_status()
-                    creation_id = media_resp.json().get("id")
-                    
-                    import time
-                    for attempt in range(3):
-                        time.sleep(5)  # Wait for IG to process the video
-                        publish_resp = requests.post(
-                            f"https://graph.instagram.com/{ig_user_id}/media_publish",
-                            data={
-                                "creation_id": creation_id,
-                                "access_token": access_token,
-                            },
-                        )
-                        if publish_resp.ok:
-                            ig_post_id = publish_resp.json().get("id")
-                            break
-                except Exception as e:
-                    print(f"Failed to post to Instagram: {e}")
-                    
-            if body.post_to_facebook:
-                try:
-                    conn = get_facebook_connection(body.client_id)
-                    page_id = conn["page_id"]
-                    access_token = conn["access_token"]
-                    
-                    fb_resp = requests.post(
-                        f"https://graph.facebook.com/v18.0/{page_id}/videos",
-                        data={
-                            "file_url": gcs_url,
-                            "description": social_caption,
-                            "access_token": access_token,
-                        },
-                    )
-                    fb_resp.raise_for_status()
-                    fb_post_id = fb_resp.json().get("id")
-                except Exception as e:
-                    print(f"Failed to post to Facebook: {e}")
-
-        _append_content_video_post_urls(
-            client_id=client_id,
-            channel_id=channel_id,
-            topic_id=body.topic_id,
-            language=body.language,
-            video_id=video_id,
-            ig_post_id=ig_post_id,
-            fb_post_id=fb_post_id,
-            drive_link=body.drive_link,
-            post_to_instagram=body.post_to_instagram,
-            post_to_facebook=body.post_to_facebook,
-            social_source_url=body.social_source_url,
-        )
-                    
-    finally:
-        # 5. Clean up temporary files
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        if thumbnail_path and thumbnail_path.startswith("/tmp/") and os.path.exists(thumbnail_path):
-            os.remove(thumbnail_path)
-
-    return {
-        "status": "success",
-        "video_id": video_id,
-        "ig_post_id": ig_post_id if 'ig_post_id' in locals() else None,
-        "fb_post_id": fb_post_id if 'fb_post_id' in locals() else None
-    }
+    """YouTube and Facebook use the local file. Instagram copies it to Supabase."""
+    return execute_video_upload(body, current_user["username"])

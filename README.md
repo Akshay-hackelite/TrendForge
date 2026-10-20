@@ -1,4 +1,4 @@
-# YouTube Analytics
+# Trend Analytics
 
 Split stack: React frontend (`app.xyz`) + FastAPI backend (`api.xyz`).
 

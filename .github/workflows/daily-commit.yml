@@ -1,5 +1,5 @@
 name: Daily sync
-run-name: chore: sync
+run-name: "chore: sync"
 
 on:
   schedule:

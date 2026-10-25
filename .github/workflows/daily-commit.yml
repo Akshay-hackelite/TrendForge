@@ -1,0 +1,32 @@
+name: Daily Empty Commit
+
+on:
+  schedule:
+    # Both times are UTC. IST is UTC+5:30.
+    - cron: "30 3 * * *"   # 9:00 AM IST
+    - cron: "30 15 * * *"  # 9:00 PM IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-empty-commit
+  cancel-in-progress: false
+
+jobs:
+  create-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Create and push empty commit
+        run: |
+          git config user.name "Ace"
+          git config user.email "107408399+Akshay-hackelite@users.noreply.github.com"
+          git commit --allow-empty -m "Scheduled empty commit"
+          git push

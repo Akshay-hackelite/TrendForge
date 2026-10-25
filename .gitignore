@@ -39,3 +39,8 @@ frontend/dist/
 .vercel
 .env*
 backend/social_assets/
+
+# Local tooling / generated artifacts
+.playwright-cli/
+playwright-cli/
+output/

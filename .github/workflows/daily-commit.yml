@@ -1,4 +1,5 @@
-name: Daily Empty Commit
+name: Daily sync
+run-name: chore: sync
 
 on:
   schedule:
@@ -24,9 +25,9 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Create and push empty commit
+      - name: Create and push commit
         run: |
           git config user.name "Ace"
           git config user.email "107408399+Akshay-hackelite@users.noreply.github.com"
-          git commit --allow-empty -m "Scheduled empty commit"
+          git commit --allow-empty -m "chore: sync"
           git push
